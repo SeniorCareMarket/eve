@@ -12,6 +12,7 @@
                             unchecked-int unsigned-bit-shift-right long double locking bytes
                             shorts ints floats doubles objects defdelay])
   (:require
+   [eve.fsync :as fsync]
    [eve.host :refer [aget aset alength byte-array short-array int-array float-array
                      double-array object-array into-array unchecked-byte unchecked-int
                      unsigned-bit-shift-right long double locking bytes shorts ints floats
@@ -1093,6 +1094,16 @@
 ;; mmap-Backed Slab Initialization (Node.js cross-process)
 ;; -----------------------------------------------------------------------
 
+(defn- fill-zero!
+  "Write zeros over the first N bytes of a new file's region R, so the file has no hole (eve.fsync forces a set of files
+   with one flush only when each is hole-free). Run by a domain's creator, before any other process can open it."
+  [r n]
+  (loop [off 0]
+    (when (< off n)
+      (let [k (min 65536 (- n off))]
+        (mem/write-bytes! r off (js/Uint8Array. k))
+        (recur (+ off k))))))
+
 (defn init-mmap-slab!
   "Initialize a slab class backed by two mmap files on Node.js:
    data file (header + blocks) and bitmap file.
@@ -1110,6 +1121,11 @@
         desc-region  (region/open-mmap-region (str path ".desc-count") (:desc-column-bytes layout))
         desc-flags-region (region/open-mmap-region (str path ".desc-flags") (:desc-column-bytes layout))
         desc-pointer-region (region/open-mmap-region (str path ".desc-pointer") (:desc-column-bytes layout))]
+    ;; every page written once, so the new files have no hole (eve.fsync)
+    (fill-zero! region data-bytes)
+    (fill-zero! bm-region bitmap-bytes)
+    (doseq [r [desc-region desc-flags-region desc-pointer-region]]
+      (fill-zero! r (:desc-column-bytes layout)))
     ;; Write slab header
     (mem/store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
     (mem/store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
@@ -1176,6 +1192,11 @@
         desc-region (region/open-mmap-region (str path ".desc-count") (d/desc-column-byte-size total-blocks))
         desc-flags-region (region/open-mmap-region (str path ".desc-flags") (d/desc-column-byte-size total-blocks))
         desc-pointer-region (region/open-mmap-region (str path ".desc-pointer") (d/desc-column-byte-size total-blocks))]
+    ;; the grown files' sizes forced before a block past the old end is handed out (an msync of a range commits its
+    ;; file's size): a redo-log commit (eve.atom, jlog v2) forces no slab file, so a block its record names must lie
+    ;; in a file whose size a crash keeps
+    (doseq [r [region bm-region desc-region desc-flags-region desc-pointer-region]]
+      (mem/sync-region! r 0 64))
     (aset slab-total-blocks class-idx total-blocks)
     (aset slab-desc-regions class-idx desc-region)
     (aset slab-desc-flags-regions class-idx desc-flags-region)
@@ -1327,6 +1348,7 @@
         total-bytes (:total-bytes layout)
         data-offset (:data-offset layout)
         region      (region/open-mmap-region path total-bytes)]
+    (fill-zero! region total-bytes)
     (coalesc/init-coalesc-region! region initial-data-size max-desc)
     ;; Cache layout info so slab-offset->byte-offset works for class 6
     (aset slab-data-offsets OVERFLOW_CLASS_IDX data-offset)
@@ -1512,20 +1534,47 @@
                                   (bit-shift-left 1 (bit-and bi 31)))))))
       (some? (desc-of sio slab-offset)))))
 
+(defn- mark-allocated!
+  "Recovery's replay of a redo record (eve.atom, jlog v2): the block's bitmap bit set when it is clear (classes 0-5),
+   one taken from its class's free count. true when it set it; throws for a block past its class's mapped end."
+  [_sio slab-offset]
+  (let [ci (decode-class-idx slab-offset)
+        bi (decode-block-idx slab-offset)]
+    (when (< ci OVERFLOW_CLASS_IDX)
+      (when-not (< bi (aget slab-total-blocks ci))
+        (throw (ex-info "eve: a logged block past its slab class's end" {:class ci :block bi})))
+      (when (wasm/bitmap-alloc-cas! ci (aget slab-bitmap-offsets ci) bi)
+        (mem/sub-i32! (:region (wasm/get-slab-instance ci)) d/SLAB_HDR_FREE_COUNT 1)
+        true))))
+
+(defn- domain-file-paths
+  "The open mmap domain's slab files — each bitmap class's data, bitmap and three descriptor-column files, the
+   coalesced class's file — for eve.fsync."
+  []
+  (into (if mmap-coalesc-path [mmap-coalesc-path] [])
+        (mapcat (fn [i]
+                  (when-let [p (aget slab-file-paths i)]
+                    [p (aget slab-bitmap-paths i) (str p ".desc-count") (str p ".desc-flags") (str p ".desc-pointer")])))
+        (range d/NUM_SLAB_CLASSES)))
+
 (defn- sync-domain-sio!
   "Force the module slabs' file-backed regions — an mmap domain's slab,
    bitmap and descriptor regions per class, and the coalescing region —
    to durable storage (eve.mem/sync-region!: a SAB region, the module's
    own slabs, has nothing to force). Registered as :sync-domain-sio!."
   [_sio]
-  (dotimes [i d/NUM_SLAB_CLASSES]
-    (when-let [inst (wasm/get-slab-instance i)]
-      (mem/sync-region! (:region inst))
-      (mem/sync-region! (:bitmap-region inst)))
-    (when-let [dr (aget slab-desc-regions i)]
-      (mem/sync-region! dr)))
-  (when mmap-coalesc-region
-    (mem/sync-region! mmap-coalesc-region)))
+  ;; option 1 (eve.fsync): the files written back and made durable with one flush where that is safe
+  (when-not (let [paths (domain-file-paths)] (and (seq paths) (fsync/sync-files! paths)))
+    (dotimes [i d/NUM_SLAB_CLASSES]
+      (when-let [inst (wasm/get-slab-instance i)]
+        (mem/sync-region! (:region inst))
+        (mem/sync-region! (:bitmap-region inst)))
+    ;; all three descriptor columns: a flags or pointer column left unforced is a row whose count survives a crash
+    ;; and whose flags do not
+      (doseq [dr [(aget slab-desc-regions i) (aget slab-desc-flags-regions i) (aget slab-desc-pointer-regions i)]]
+        (when dr (mem/sync-region! dr))))
+    (when mmap-coalesc-region
+      (mem/sync-region! mmap-coalesc-region))))
 
 (alloc/register-host-slab!
  {:default-sio cljs-sio
@@ -1533,6 +1582,7 @@
   :desc-of desc-of
   :desc-row desc-row
   :allocated? allocated?
+  :mark-allocated! mark-allocated!
   :refresh! (fn [_sio] (when (aget slab-file-paths 0) (refresh-mmap-slabs!)))
   ;; the module slab is an mmap domain's files while it holds their paths
   :shared-domain? (fn [_sio] (some? (aget slab-file-paths 0)))

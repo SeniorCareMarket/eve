@@ -40,6 +40,17 @@
 
 (defn file-exists? [path] (.existsSync (io/File (str path))))
 
+(defn file-size
+  "The size in bytes of the file at path, or nil when there is none."
+  [path]
+  (let [f (io/File (str path))] (when (.existsSync f) (.lengthSync f))))
+
+(defn rename-file!
+  "Rename the file at from to to (replacing a file at to): one step on the host's filesystem; a failure throws."
+  [from to]
+  (.renameSync (io/File (str from)) (str to))
+  nil)
+
 (defn create-exclusive!
   "Create the file at path, empty, if no file is there — one atomic step against every other process: true for the
    process that created it, false when it already existed."

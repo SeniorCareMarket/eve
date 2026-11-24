@@ -7,6 +7,12 @@
    :main eve.runner.eve-test-main/main
    :output-to "target/eve-test/all.js"}
 
+  ;; the jlog kill -9 crash driver (test/eve/jlog_crash.cljc; scripts/jlog-crash.sh)
+  :jlog-crash
+  {:target :node-script
+   :main eve.jlog-crash/main
+   :output-to "target/jlog-crash/main.js"}
+
   ;; merkle-phase5 acceptance suite only (small compile graph; see
   ;; test/eve/runner/merkle_phase5_main.cljs)
   :merkle-phase5

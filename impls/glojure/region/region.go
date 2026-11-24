@@ -102,6 +102,25 @@ func Close(r *Region) error {
 	return err
 }
 
+// Sync forces the pages of a file region covering [off, off+n) to stable
+// storage — msync MS_SYNC over the range widened to whole pages of the host's
+// own size: eve.mem's ISyncableRegion on glj (H1, eve-mmap-journal-plan §1.4).
+// A heap region has nothing to force. A failure is returned, never swallowed.
+func Sync(r *Region, off, n int64) error {
+	if r.path == "" || n <= 0 {
+		return nil
+	}
+	check(r, off, n)
+	ps := int64(os.Getpagesize())
+	start := off - off%ps
+	_, _, e := syscall.Syscall(syscall.SYS_MSYNC, uintptr(unsafe.Pointer(&r.b[start])), uintptr(off+n-start),
+		uintptr(syscall.MS_SYNC))
+	if e != 0 {
+		return fmt.Errorf("msync %s: %w", r.path, e)
+	}
+	return nil
+}
+
 func Len(r *Region) int64 { return int64(len(r.b)) }
 func Fd(r *Region) int64  { return int64(r.fd) }
 func Pid() int64          { return int64(os.Getpid()) }

@@ -91,7 +91,9 @@
          (contains? field-map (name (second form))))
     (let [field-spec (get field-map (name (second form)))
           val-expr (jvm-rewrite-set!-forms (nth form 2) field-map slab-off-expr)
-          write (jvm-emit-field-write field-spec slab-off-expr val-expr)]
+          ;; an in-place write noted for a redo-log commit (eve.deftype-proto.alloc/note-write!)
+          write (list 'do (list 'eve.deftype-proto.alloc/note-write! slab-off-expr)
+                      (jvm-emit-field-write field-spec slab-off-expr val-expr))]
       (when (= :immutable (:mutability field-spec))
         (throw (ex-info (str "Cannot set! immutable field: " (:name field-spec)) {})))
       (if-let [kind (v/ref-kind field-spec)]
@@ -117,35 +119,36 @@
       ;; Returns true iff the exchange succeeded (old value == expected).
       (let [expected-expr (jvm-rewrite-set!-forms (nth form 2) field-map slab-off-expr)
             new-expr (jvm-rewrite-set!-forms (nth form 3) field-map slab-off-expr)]
-        (if-let [kind (v/ref-kind field-spec)]
+        (list 'do (list 'eve.deftype-proto.alloc/note-write! slab-off-expr)
+              (if-let [kind (v/ref-kind field-spec)]
           ;; an ^:int32 ^:ref field's cas!: when it lands, the store rule (eve.tally/store!) — expected out, new in
-          (list 'let ['exp__ref (list 'unchecked-int expected-expr)
-                      'new__ref (list 'unchecked-int new-expr)
-                      'ok__ref (list '== 'exp__ref
-                                     (list 'eve.slab-io/cas-i32! 'sio__ slab-off-expr (:offset field-spec)
-                                           'exp__ref 'new__ref))]
-                (list 'when 'ok__ref
-                      (list 'eve.deftype.slab-runtime/ref-stored! 'sio__ slab-off-expr 'exp__ref 'new__ref kind))
-                'ok__ref)
+                (list 'let ['exp__ref (list 'unchecked-int expected-expr)
+                            'new__ref (list 'unchecked-int new-expr)
+                            'ok__ref (list '== 'exp__ref
+                                           (list 'eve.slab-io/cas-i32! 'sio__ slab-off-expr (:offset field-spec)
+                                                 'exp__ref 'new__ref))]
+                      (list 'when 'ok__ref
+                            (list 'eve.deftype.slab-runtime/ref-stored! 'sio__ slab-off-expr 'exp__ref 'new__ref kind))
+                      'ok__ref)
           ;; (the field's 32 bits, as its write stores them: unchecked)
-          (list '==
-                (list 'unchecked-int expected-expr)
-                (list 'eve.slab-io/cas-i32!
-                      'sio__ slab-off-expr (:offset field-spec)
-                      (list 'unchecked-int expected-expr) (list 'unchecked-int new-expr))))))
+                (list '==
+                      (list 'unchecked-int expected-expr)
+                      (list 'eve.slab-io/cas-i32!
+                            'sio__ slab-off-expr (:offset field-spec)
+                            (list 'unchecked-int expected-expr) (list 'unchecked-int new-expr)))))))
 
     (seq? form)
     (with-meta (apply list (map #(jvm-rewrite-set!-forms % field-map slab-off-expr) form))
-               (meta form))
+      (meta form))
     (vector? form)
     (with-meta (mapv #(jvm-rewrite-set!-forms % field-map slab-off-expr) form)
-               (meta form))
+      (meta form))
     (map? form)
     (with-meta (into {} (map (fn [[k v]]
                                [(jvm-rewrite-set!-forms k field-map slab-off-expr)
                                 (jvm-rewrite-set!-forms v field-map slab-off-expr)])
                              form))
-               (meta form))
+      (meta form))
     :else form))
 
 (defn- jvm-transform-method-body

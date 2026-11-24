@@ -12,15 +12,16 @@
                             locking transient persistent! conj! assoc! bytes objects
                             const-bytes const-objects])
   (:require
+   [eve.fsync :as fsync]
    [eve.host :refer [aget aset alength byte-array int-array long-array object-array
                      into-array unchecked-byte unchecked-int unchecked-long
                      unchecked-inc-int unsigned-bit-shift-right long double class locking
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects]]
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]]
+                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]]
    [clojure.string :as str]
    [jolt.ffi :as ffi]
    [jolt.scheme :as scheme]))
@@ -107,6 +108,12 @@
 ;; syscall(SYS-futex, uaddr, op, val, timeout*, uaddr2, val3) — Linux's only (its variadic convention is the fixed one)
 (ffi/defcfn jolt-futex "syscall" [:long :pointer :int :int :pointer :pointer :int] :long
   {:blocking true :capture-native-error true})
+;; msync(2) over a mapped range (eve.mem/ISyncableRegion below), and the page size its address is rounded to (kondo
+;; reads a defcfn's name as an unresolved symbol, as it does every binding above: the ignores keep the count at base)
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-msync "msync" [:pointer :size_t :int] :int {:blocking true :capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-getpagesize "getpagesize" [] :int)
 
 ;; The platform's atomics, each word width's: load, store, fetch-add (the value before), exchange (the value before),
 ;; compare-and-swap (the value found: expected when it swapped).
@@ -183,6 +190,24 @@
 (declare ^:private read-bytes* ^:private pl-i32 ^:private pl-u8 ^:private pl-i64 ^:private ps-i32! ^:private ps-u8!
          ^:private x86-64-linux? ^:private fast-cas4 ^:private fast-cas8)
 
+(def ^:private MS-SYNC (if (= :macos os) 0x10 4))
+
+(def ^:private page-bytes (delay (jolt-getpagesize)))
+
+(defn- msync-range!
+  "msync(2) MS_SYNC over [off, off+len) of the mapping at BASE, widened to whole pages of the host's own size: on
+   return the range's pages are on stable storage. A failure throws (never swallowed: a durable commit must not
+   report success over a flush that did not happen)."
+  [base off len]
+  (when (pos? len)
+    (let [ps @page-bytes
+          start (+ base off)
+          a (- start (mod start ps))
+          [r e] (jolt-msync a (- (+ start len) a) MS-SYNC)]
+      (when (neg? r)
+        (throw (ex-info (str "eve.region: msync failed: errno " e) {:errno e :off off :len len})))))
+  nil)
+
 (deftype JoltRegion [base size backing]
   mem/IMemRegion
   (-byte-length [_] size)
@@ -217,7 +242,11 @@
   (-plain-load-u8 [this off] (pl-u8 this base off))
   mem/IPlainStore
   (-plain-store-i32! [this off v] (ps-i32! this base off v) nil)
-  (-plain-store-u8! [this off v] (ps-u8! this base off v) nil))
+  (-plain-store-u8! [this off v] (ps-u8! this base off v) nil)
+  ;; durability: a mapped region's pages force by msync; a heap region (a bytevector backing) has nothing to force
+  mem/ISyncableRegion
+  (-sync! [_] (when-not backing (msync-range! base 0 size)) nil)
+  (-sync-range! [_ off len] (when-not backing (msync-range! base off len)) nil))
 
 ;; A region's memory goes back when the region does, as a JVM byte array or a Go slice does. A heap region IS Chez heap
 ;; memory: an immobile bytevector (the collector marks it where it is and never moves it, so its address holds for the
@@ -587,3 +616,42 @@
                                          (.-base ^JoltRegion region)
                                          bm-byte-offset bit-idx)
                           (bm-free region bm-byte-offset bit-idx)))))))
+
+;; ---------------------------------------------------------------------------
+;; eve.fsync's file syscalls (option 1, doc/jlog-redo-spec.md §9) through jolt.ffi — Linux only (struct stat's st_ino
+;; at 8 and st_size at 48, statfs's f_type at 0: x86-64 and aarch64 alike); elsewhere nil, and eve.fsync's callers
+;; force region by region.
+;; ---------------------------------------------------------------------------
+
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-fstat "fstat" [:int :pointer] :int {:capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-lseek "lseek" [:int :int64 :int] :int64 {:capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-fstatfs "fstatfs" [:int :pointer] :int {:capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-sync-file-range "sync_file_range" [:int :int64 :int64 :uint32] :int
+  {:blocking true :capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-fdatasync "fdatasync" [:int] :int {:blocking true :capture-native-error true})
+
+(defn- file-call! [what [r e]]
+  (when (neg? r) (throw (ex-info (str "eve.region: " what " failed: errno " e) {:errno e})))
+  r)
+
+(defn- with-buf [n f]
+  (let [b (ffi/alloc n)]
+    (try (f b) (finally (ffi/free b)))))
+
+(def ^:private jolt-file-syscalls
+  (when (= :linux os)
+    {:open-ro (fn [path] (first (jolt-open (.getAbsolutePath (java.io.File. ^String path)) 0 0)))
+     :fstat (fn [fd] (with-buf 144 (fn [b] (file-call! "fstat" (jolt-fstat fd b))
+                                     [(ffi/read (+ b 8) :int64) (ffi/read (+ b 48) :int64)])))
+     :seek-hole (fn [fd] (file-call! "lseek SEEK_HOLE" (jolt-lseek fd 0 4)))
+     :fs-type (fn [fd] (with-buf 128 (fn [b] (file-call! "fstatfs" (jolt-fstatfs fd b)) (ffi/read b :int64))))
+     :sync-range (fn [fd] (file-call! "sync_file_range" (jolt-sync-file-range fd 0 0 7)) nil)
+     :fdatasync (fn [fd] (file-call! "fdatasync" (jolt-fdatasync fd)) nil)
+     :close (fn [fd] (jolt-close fd) nil)}))
+
+(fsync/register! (fn [] jolt-file-syscalls))

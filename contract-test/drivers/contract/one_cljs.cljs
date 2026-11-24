@@ -2,8 +2,8 @@
   "The compiled ClojureScript row of the DataScript shootout contract
    (shadow-cljs :node-script): the SAME durable shape contract.one opens on
    every host — a fresh persistent Eve domain, journaled by default, over
-   the node mmap region (journal-file/node forces with fsync; the region's
-   sync is a real msync). The mmap_cas addon is loaded explicitly and
+   the node mmap region (the journal, eve.jlog, is a mapped log the region's
+   real msync forces). The mmap_cas addon is loaded explicitly and
    LOUDLY first: a persistent run without it must fail here, never fall
    back to a region nothing forces (js/require throws on a missing file;
    the loaded? check throws on anything else). Then the process slab (the

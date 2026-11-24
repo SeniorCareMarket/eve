@@ -13,16 +13,17 @@
                             locking transient persistent! conj! assoc! bytes objects
                             const-bytes const-objects])
   (:require
+   [eve.fsync :as fsync]
    [eve.host :refer [aget aset alength byte-array int-array long-array object-array
                      into-array unchecked-byte unchecked-int unchecked-long
                      unchecked-inc-int unsigned-bit-shift-right long double class locking
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects]]
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
-                     -sync! -sync-range!]])
+                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
+                            -sync! -sync-range!]])
   (:import
    [java.io RandomAccessFile]
    [java.lang.invoke MethodHandle MethodHandles MethodType VarHandle VarHandle$AccessMode]
@@ -1143,3 +1144,68 @@
   "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
   [r]
   (instance? LustreJvmMmapRegion r))
+
+;; ---------------------------------------------------------------------------
+;; eve.fsync's file syscalls (option 1, doc/jlog-redo-spec.md §9): open, fstat, lseek, fstatfs, sync_file_range,
+;; fdatasync, close through the JVM's foreign function API (java.lang.foreign; final in JDK 22, and callable from
+;; Clojure on 21 without --enable-preview — measured 2026-11-24 on OpenJDK 21.0.13), reached by reflection so this
+;; namespace still loads on a JDK without it. Linux only (struct stat's st_ino at 8 and st_size at 48, statfs's f_type
+;; at 0: x86-64 and aarch64 alike); elsewhere, or when the API is missing, nil — eve.fsync's callers then force
+;; region by region.
+;; ---------------------------------------------------------------------------
+
+(def ^:private ffm-syscalls
+  (delay
+    (when (.startsWith (str (System/getProperty "os.name")) "Linux")
+      (try
+        (let [cls (fn [n] (Class/forName (str "java.lang.foreign." n)))
+              sfield (fn [c f] (clojure.lang.Reflector/getStaticField ^Class (cls c) ^String f))
+              smeth (fn [c m args] (clojure.lang.Reflector/invokeStaticMethod ^Class (cls c) ^String m
+                                                                              ^"[Ljava.lang.Object;" (clojure.core/object-array args)))
+              linker (smeth "Linker" "nativeLinker" [])
+              lookup (clojure.lang.Reflector/invokeInstanceMethod linker "defaultLookup" (clojure.core/object-array 0))
+              I (sfield "ValueLayout" "JAVA_INT")
+              L (sfield "ValueLayout" "JAVA_LONG")
+              A (sfield "ValueLayout" "ADDRESS")
+              dc (fn [nm ret args]
+                   (let [sym (clojure.lang.Reflector/invokeInstanceMethod
+                              (clojure.lang.Reflector/invokeInstanceMethod lookup "find" (clojure.core/object-array [nm]))
+                              "orElseThrow" (clojure.core/object-array 0))
+                         fd (smeth "FunctionDescriptor" "of" [ret (clojure.core/into-array (cls "MemoryLayout") args)])]
+                     (clojure.lang.Reflector/invokeInstanceMethod
+                      linker "downcallHandle" (clojure.core/object-array [sym fd (clojure.core/into-array (cls "Linker$Option") [])]))))
+              call (fn [^java.lang.invoke.MethodHandle h & args] (.invokeWithArguments h ^"[Ljava.lang.Object;" (clojure.core/object-array args)))
+              h-open (dc "open" I [A I])
+              h-fstat (dc "fstat" I [I A])
+              h-lseek (dc "lseek" L [I L I])
+              h-fstatfs (dc "fstatfs" I [I A])
+              h-sfr (dc "sync_file_range" I [I L L I])
+              h-fdatasync (dc "fdatasync" I [I])
+              h-close (dc "close" I [I])
+              arena (fn [] (smeth "Arena" "ofConfined" []))
+              alloc (fn [a n] (clojure.lang.Reflector/invokeInstanceMethod a "allocate" (clojure.core/object-array [(clojure.core/long n)])))
+              cstr (fn [a s] (try (clojure.lang.Reflector/invokeInstanceMethod a "allocateUtf8String" (clojure.core/object-array [s]))
+                                  (catch IllegalArgumentException _
+                                    (clojure.lang.Reflector/invokeInstanceMethod a "allocateFrom" (clojure.core/object-array [s])))))
+              get-long (fn [seg off] (clojure.lang.Reflector/invokeInstanceMethod seg "get" (clojure.core/object-array [L (clojure.core/long off)])))
+              close-arena (fn [a] (clojure.lang.Reflector/invokeInstanceMethod a "close" (clojure.core/object-array 0)))
+              chk (fn [what r] (when (neg? (clojure.core/long r)) (throw (ex-info (str "eve.region: " what " failed") {:result r}))) r)]
+          ;; the handles resolve now: a libc without one of them is a host without the syscalls
+          {:open-ro (fn [path] (let [a (arena)] (try (clojure.core/long (call h-open (cstr a path) (int 0))) (finally (close-arena a)))))
+           :fstat (fn [fd] (let [a (arena)]
+                             (try (let [st (alloc a 144)]
+                                    (chk "fstat" (call h-fstat (int fd) st))
+                                    [(clojure.core/long (get-long st 8)) (clojure.core/long (get-long st 48))])
+                                  (finally (close-arena a)))))
+           :seek-hole (fn [fd] (clojure.core/long (chk "lseek SEEK_HOLE" (call h-lseek (int fd) (clojure.core/long 0) (int 4)))))
+           :fs-type (fn [fd] (let [a (arena)]
+                               (try (let [b (alloc a 128)]
+                                      (chk "fstatfs" (call h-fstatfs (int fd) b))
+                                      (clojure.core/long (get-long b 0)))
+                                    (finally (close-arena a)))))
+           :sync-range (fn [fd] (chk "sync_file_range" (call h-sfr (int fd) (clojure.core/long 0) (clojure.core/long 0) (int 7))) nil)
+           :fdatasync (fn [fd] (chk "fdatasync" (call h-fdatasync (int fd))) nil)
+           :close (fn [fd] (call h-close (int fd)) nil)})
+        (catch Throwable _ nil)))))
+
+(fsync/register! (fn [] @ffm-syscalls))

@@ -40,6 +40,19 @@
 (defn file-exists? [path]
   (filelib/is_regular (erlang/binary_to_list path)))
 
+(defn file-size
+  "The size in bytes of the file at path, or nil when there is none."
+  [path]
+  (when (file-exists? path) (filelib/file_size (erlang/binary_to_list path))))
+
+(defn rename-file!
+  "Rename the file at from to to (replacing a file at to): one step on the host's filesystem; a failure throws."
+  [from to]
+  (let [r (file/rename (erlang/binary_to_list from) (erlang/binary_to_list to))]
+    (when-not (= r :ok)
+      (throw (ex-info (str "eve.process: rename " from " -> " to ": " r) {:from from :to to})))
+    nil))
+
 (defn create-exclusive!
   "Create the file at path, empty, if no file is there — one atomic step
    against every other process: true for the process that created it, false

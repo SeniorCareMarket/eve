@@ -18,15 +18,16 @@
                             locking transient persistent! conj! assoc! bytes objects
                             const-bytes const-objects])
   (:require
+   [eve.fsync :as fsync]
    [eve.host :refer [aget aset alength byte-array int-array long-array object-array
                      into-array unchecked-byte unchecked-int unchecked-long
                      unchecked-inc-int unsigned-bit-shift-right long double class locking
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects]]
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]])
+                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]])
   (:import
    [java.io RandomAccessFile]
    [java.nio ByteBuffer ByteOrder MappedByteBuffer]
@@ -372,8 +373,30 @@
           ;; .release is not reachable from bb; close releases (measured).
           (try (f) (finally (.close fl))))
         (let [^FileChannel c (FileChannel/open path (into-array OpenOption [StandardOpenOption/READ
-                                                                             StandardOpenOption/WRITE]))]
-          (try (.lock c (long byte-off) 4 false) (f) (finally (.close c))))))))
+                                                                            StandardOpenOption/WRITE]))]
+          (try (.lock c (long byte-off) 4 false) (f) (finally (.close c)))))))
+
+  ;; durability (eve.mem/ISyncableRegion): the mapped segments force, the whole
+  ;; table or the windows meeting a range (MappedByteBuffer.force(index, length),
+  ;; reachable on bb, measured 2026-11-23) — H1 for bb's lock-only region
+  mem/ISyncableRegion
+  (-sync! [_]
+    (dotimes [k (alength segments)]
+      (.force ^MappedByteBuffer (aget segments k)))
+    nil)
+  (-sync-range! [_ byte-off len]
+    (let [off (long byte-off)
+          end (+ off (long len))]
+      (when (pos? (long len))
+        (loop [k (unsigned-bit-shift-right off shift)]
+          (let [seg-start (bit-shift-left k shift)]
+            (when (and (< seg-start end) (< k (alength segments)))
+              (let [^MappedByteBuffer b (aget segments (int k))
+                    i0 (max off seg-start)
+                    i1 (min end (+ seg-start (long (.capacity b))))]
+                (.force b (int (- i0 seg-start)) (int (- i1 i0))))
+              (recur (inc k)))))))
+    nil))
 
 ;; ------------------------------------------------------------------
 ;; Native CAS — babashka.ffi over libatomic (the substrate of the
@@ -876,3 +899,43 @@
   "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
   [_r]
   false)
+
+;; ---------------------------------------------------------------------------
+;; eve.fsync's file syscalls (option 1, doc/jlog-redo-spec.md §9) through babashka.ffi — Linux only (struct stat's
+;; st_ino at 8 and st_size at 48, statfs's f_type at 0: x86-64 and aarch64 alike); without babashka.ffi (a static bb)
+;; or elsewhere nil, and eve.fsync's callers force region by region.
+;; ---------------------------------------------------------------------------
+
+(def ^:private bb-file-syscalls
+  (delay
+    (when-not mac-os?
+      (try
+        (require 'babashka.ffi)
+        (let [ffi-ns (the-ns 'babashka.ffi)
+              rv (fn [sym] (if-let [v (ns-resolve ffi-ns sym)] (var-get v) (throw (ex-info (str "no " sym) {}))))
+              cfn (rv 'cfn)
+              libc ((rv 'load-system-library) "c")
+              rd (rv 'read)
+              seg (rv 'segment)
+              address (rv 'address)
+              alloc (rv 'alloc)
+              arena (if-let [v (ns-resolve ffi-ns 'auto-arena)] (var-get v) (rv 'global-arena))
+              c-open (cfn libc "open" [:string :int :& :int] :int)
+              c-fstat (cfn libc "fstat" [:int :pointer] :int)
+              c-lseek (cfn libc "lseek" [:int :int64 :int] :int64)
+              c-fstatfs (cfn libc "fstatfs" [:int :pointer] :int)
+              c-sfr (cfn libc "sync_file_range" [:int :int64 :int64 :int] :int)
+              c-fdatasync (cfn libc "fdatasync" [:int] :int)
+              c-close (cfn libc "close" [:int] :int)
+              rd64 (fn [p off] (rd (seg (+ (address p) off) 8) :int64))
+              chk (fn [what r] (when (neg? r) (throw (ex-info (str "eve.region: " what " failed") {:result r}))) r)]
+          {:open-ro (fn [path] (c-open (.getAbsolutePath (java.io.File. ^String path)) 0 0))
+           :fstat (fn [fd] (let [b (alloc (arena) 144)] (chk "fstat" (c-fstat fd b)) [(rd64 b 8) (rd64 b 48)]))
+           :seek-hole (fn [fd] (chk "lseek SEEK_HOLE" (c-lseek fd 0 4)))
+           :fs-type (fn [fd] (let [b (alloc (arena) 128)] (chk "fstatfs" (c-fstatfs fd b)) (rd64 b 0)))
+           :sync-range (fn [fd] (chk "sync_file_range" (c-sfr fd 0 0 7)) nil)
+           :fdatasync (fn [fd] (chk "fdatasync" (c-fdatasync fd)) nil)
+           :close (fn [fd] (c-close fd) nil)})
+        (catch Throwable _ nil)))))
+
+(fsync/register! (fn [] @bb-file-syscalls))

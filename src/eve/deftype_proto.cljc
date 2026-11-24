@@ -155,7 +155,9 @@
           val-expr (jvm-rewrite-set!-forms (nth form 2) field-map slab-off-expr)]
       (when (= :immutable (:mutability field-spec))
         (throw (ex-info (str "Cannot set! immutable field: " (:name field-spec)) {})))
-      (jvm-write-fn-for-type field-spec slab-off-expr (:offset field-spec) val-expr))
+      ;; an in-place write noted for a redo-log commit (eve.deftype-proto.alloc/note-write!)
+      (list 'do (list 'eve.deftype-proto.alloc/note-write! slab-off-expr)
+            (jvm-write-fn-for-type field-spec slab-off-expr (:offset field-spec) val-expr)))
 
     ;; cas! — atomic compare-and-exchange via ISlabIO
     (and (seq? form)
@@ -169,25 +171,26 @@
         (throw (ex-info "cas! requires ^:volatile-mutable field" {:field (:name field-spec)})))
       (when (= :serialized (:type-class field-spec))
         (throw (ex-info "cas! not supported on serialized fields" {:field (:name field-spec)})))
-      (list '==
-            (list 'int expected-expr)
-            (list 'eve.slab-io/cas-i32!
-                  'sio__ slab-off-expr (:offset field-spec)
-                  (list 'int expected-expr) (list 'int new-expr))))
+      (list 'do (list 'eve.deftype-proto.alloc/note-write! slab-off-expr)
+            (list '==
+                  (list 'int expected-expr)
+                  (list 'eve.slab-io/cas-i32!
+                        'sio__ slab-off-expr (:offset field-spec)
+                        (list 'int expected-expr) (list 'int new-expr)))))
 
     ;; Recurse
     (seq? form)
     (with-meta (apply list (map #(jvm-rewrite-set!-forms % field-map slab-off-expr) form))
-               (meta form))
+      (meta form))
     (vector? form)
     (with-meta (mapv #(jvm-rewrite-set!-forms % field-map slab-off-expr) form)
-               (meta form))
+      (meta form))
     (map? form)
     (with-meta (into {} (map (fn [[k v]]
                                [(jvm-rewrite-set!-forms k field-map slab-off-expr)
                                 (jvm-rewrite-set!-forms v field-map slab-off-expr)])
                              form))
-               (meta form))
+      (meta form))
     :else form))
 
 (defn jvm-transform-extend-method-body

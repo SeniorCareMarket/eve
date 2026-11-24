@@ -12,16 +12,17 @@
                             locking transient persistent! conj! assoc! bytes objects
                             const-bytes const-objects])
   (:require
+   [eve.fsync :as fsync]
    [eve.host :refer [aget aset alength byte-array int-array long-array object-array
                      into-array unchecked-byte unchecked-int unchecked-long
                      unchecked-inc-int unsigned-bit-shift-right long double class locking
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects]]
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
-                     -fill-i32!]]))
+                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock
+                            -fill-i32!]]))
 
 ;; Every region has atomic RMW unless it says otherwise.
 (extend-protocol mem/IHostAtomics
@@ -346,8 +347,8 @@
 ;; correct across nodes via the Lustre LDLM.
 
 (deftype LustreMmapRegion [^js buf   ; Node.js Buffer (mmap'd page)
-                            fd        ; file descriptor (kept open for fcntl)
-                            size]     ; byte length
+                           fd        ; file descriptor (kept open for fcntl)
+                           size]     ; byte length
   mem/IMemRegion
   (-byte-length [_] size)
 
@@ -411,6 +412,18 @@
   (-write-bytes! [_ byte-off src]
     (let [src-buf (js/Buffer.from (.-buffer src) (.-byteOffset src) (.-byteLength src))]
       (.copy src-buf buf byte-off))
+    nil)
+
+  ;; --- durability (eve.mem/ISyncableRegion): the addon's msync over the
+  ;; mapping, as NodeMmapRegion forces (a durable Lustre domain's log,
+  ;; eve.jlog, is a region of this kind and refuses a region that cannot) ---
+  mem/ISyncableRegion
+  (-sync! [_]
+    (.msync ^js (native) buf 0 size)
+    nil)
+
+  (-sync-range! [_ byte-off len]
+    (.msync ^js (native) buf byte-off len)
     nil))
 
 (defn open-lustre-region
@@ -425,3 +438,20 @@
   "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
   [r]
   (instance? LustreMmapRegion r))
+
+;; ---------------------------------------------------------------------------
+;; eve.fsync's file syscalls (option 1, doc/jlog-redo-spec.md §9) through the addon's file functions (Linux builds
+;; export them); an addon without them, or no addon, is nil, and eve.fsync's callers force region by region.
+;; ---------------------------------------------------------------------------
+
+(fsync/register!
+ (fn []
+   (when-let [^js a (try (native) (catch :default _ nil))]
+     (when (.-fileSyncRange a)
+       {:open-ro (fn [path] (.fileOpenRO a path))
+        :fstat (fn [fd] (let [r (.fileStat a fd)] [(aget r 0) (aget r 1)]))
+        :seek-hole (fn [fd] (.fileSeekHole a fd))
+        :fs-type (fn [fd] (.fileFsType a fd))
+        :sync-range (fn [fd] (.fileSyncRange a fd) nil)
+        :fdatasync (fn [fd] (.fileDatasync a fd) nil)
+        :close (fn [fd] (.fileClose a fd) nil)}))))

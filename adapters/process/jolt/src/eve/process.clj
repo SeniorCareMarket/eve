@@ -57,6 +57,18 @@
 (defn file-exists? [path]
   (.exists (java.io.File. ^String path)))
 
+(defn file-size
+  "The size in bytes of the file at path, or nil when there is none."
+  [path]
+  (let [f (java.io.File. ^String path)] (when (.exists f) (.length f))))
+
+(defn rename-file!
+  "Rename the file at from to to (replacing a file at to): one step on the host's filesystem; a failure throws."
+  [from to]
+  (when-not (.renameTo (java.io.File. ^String from) (java.io.File. ^String to))
+    (throw (ex-info (str "eve.process: rename " from " -> " to " failed") {:from from :to to})))
+  nil)
+
 (defn create-exclusive!
   "Create the file at path, empty, if no file is there — one atomic step
    against every other process: true for the process that created it, false

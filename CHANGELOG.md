@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Changed (Linux: JVM, jolt, babashka, Node): a whole-domain force is one device flush.** Checkpoints, close,
+  `sync!`, recovery, a dead writer's resolution and a fallback commit's class force write the slab files back with
+  `sync_file_range` and make them durable with one `fdatasync` (`eve.fsync`), for every file that is hole-free on ext4
+  or xfs and unchanged in inode and size since this process last fdatasync'd it; other files are forced one by one. A
+  new domain's slab files are written in full at creation, so they start hole-free (a domain's first checkpoint: 31
+  flushes; every later one: 1). Non-Linux hosts and Lustre domains force region by region as before. The Node addon
+  gains seven file functions (rebuild it).
+
+- **Changed (every host): the commit journal is `<base>.jlog`, one cljc implementation (`eve.jlog`) — a redo log,
+  one device flush per commit.** A fixed-size ring of 4 KiB record slots in a file mapped like the root, claimed by
+  CAS on mapped words — no OS file lock. It replaces the eleven per-host `eve.journal-file` adapters, whose locks did
+  not exclude each other across hosts (a Node process and a JVM or jolt process could append at once and overwrite
+  each other's records) and whose recovery installed the last record in file order: mixed-host domains lost
+  committed transactions on reopen. A commit forces no slab file: it reserves its log seq before its root CAS (log
+  order extends happens-before), writes one record — its delta and the bytes of its new blocks — and waits on the
+  log's prefix watermark (one msync, shared by concurrent commits); it lets its old root go only once the record is
+  durable. A large redo spans a run of slots, still one flush (an eve.db.ds transaction on the JVM: 10.2-10.8 ms
+  before, 5.3-6.4 ms after). Commits that cannot carry their redo (past a quarter of the ring, the coalesced class, an
+  in-place deftype write) force before their CAS and log the delta only. Recovery replays the prefix over the newest
+  anchor and pins the rows it touched (a leak, never a use-after-free); nothing in the prefix is erased. A domain with
+  a legacy `<base>.journal` is migrated on the first open no other process holds (the file is renamed
+  `<base>.journal.migrated`); a live legacy domain is refused. New option `:jlog-slots`. `doc/jlog-redo-spec.md`.
+  **Fixed (Node):** the module slab's whole-domain force skipped the descriptor flags and pointer columns.
+- **Fixed (jolt, babashka's lock-only region, glojure's region):** the region forces its pages (`msync`); before,
+  every slab and root force on them was a silent no-op. **Fixed (every JVM-slab host):** the whole-domain force
+  also forces the descriptor flags and pointer columns. **Fixed (Node):** the addon's `msync` rounds to the host's
+  page size, not 4096 (16 KiB pages).
+- **Added:** `eve.process/file-size`, `eve.process/rename-file!`; `eve.crc32`.
+
 ## [0.9.3.4] - 2026-11-20
 
 0.9.3.3 breaks cohost-media's publish on glojure (an eve flat handle reached `eve->clj` unpacked); use 0.9.3.4.

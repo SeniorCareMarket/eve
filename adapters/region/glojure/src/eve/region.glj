@@ -85,6 +85,25 @@
   (-read-bytes [this off len] (eveglj:region.ReadBytes (:r this) off len))
   (-write-bytes! [this off src] (eveglj:region.WriteBytes (:r this) off src) nil))
 
+(defn- sync-range!
+  "msync over [off, off+len) of a region's Go Region (eveglj:region.Sync; a heap region has nothing to force): a
+   failure throws."
+  [r off len]
+  (when-let [err (eveglj:region.Sync r off len)]
+    (throw (ex-info (str "eve.region: " err) {:off off :len len})))
+  nil)
+
+;; durability (eve.mem/ISyncableRegion): a file region's pages force by msync — H1 on glj
+(extend-type GljRegion
+  mem/ISyncableRegion
+  (-sync! [this] (sync-range! (:r this) 0 (:size this)))
+  (-sync-range! [this off len] (sync-range! (:r this) off len)))
+
+(extend-type GljLockedRegion
+  mem/ISyncableRegion
+  (-sync! [this] (sync-range! (:r this) 0 (:size this)))
+  (-sync-range! [this off len] (sync-range! (:r this) off len)))
+
 (defn open-mmap-region
   "Open (or create) a file-backed MAP_SHARED region of size-bytes at path-str. The file grows to size-bytes when it is
    shorter and is never truncated."

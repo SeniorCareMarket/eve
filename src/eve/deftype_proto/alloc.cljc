@@ -39,6 +39,7 @@
                      unsigned-bit-shift-right long double locking bytes shorts ints floats
                      doubles objects defdelay field]]
    [eve.slab-io :as slab]
+   [eve.fsync :as fsync]
    [eve.deftype-proto.coalesc :as coalesc]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
@@ -57,6 +58,25 @@
 ;;=============================================================================
 ;; Slab-Qualified Offset Encoding  (shared)
 ;;=============================================================================
+
+(defn- force-grown!
+  "Force the sizes of slab files a class growth just extended (each file's first bytes: an msync of a file's range
+   commits its size as fdatasync does). Growth is rare (a class doubles); a redo-log commit (eve.atom, jlog v2)
+   forces no slab file, so every block its record names must lie in a file whose size a crash keeps."
+  [& regions]
+  (doseq [r regions]
+    (when r (mem/sync-region! r 0 64))))
+
+(defn- fill-zero!
+  "Write zeros over the first N bytes of a new file's region R, so the file has no hole: eve.fsync forces a set of
+   files with one flush only when each is hole-free. Run by a domain's creator, before any other process can open the
+   domain (a hole filled later could race another process allocating there)."
+  [r n]
+  (loop [off 0]
+    (when (< off n)
+      (let [k (min 65536 (- n off))]
+        (mem/-write-bytes! r off (byte-array k))
+        (recur (+ off k))))))
 
 (def ^:const CLASS_BITS 3)
 (def ^:const BLOCK_IDX_BITS 29)
@@ -820,6 +840,10 @@
                            new-desc   (region/open-mmap-region (str path ".desc-count") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-regions ci)))
                            new-desc-f (region/open-mmap-region (str path ".desc-flags") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-flags-regions ci)))
                            new-desc-p (region/open-mmap-region (str path ".desc-pointer") (d/desc-column-byte-size n-blocks) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
+                       ;; the grown files' sizes forced before any block past the old end is handed out: a redo-log
+                       ;; commit (eve.atom, jlog v2) forces no slab file, so a block its record names must lie in a
+                       ;; file whose size a crash keeps
+                       (force-grown! new-region new-bm new-desc new-desc-f new-desc-p)
                        (aset regions ci new-region)
                        (aset bitmap-regions ci new-bm)
                        (aset desc-regions ci new-desc)
@@ -1207,6 +1231,22 @@
 
            :else false)))
 
+
+     (defn ctx-mark-allocated!
+       "Recovery's replay of a redo record (eve.atom, jlog v2): set the bitmap bit of the block at slab-offset (classes
+        0-5) when it is clear, taking one from its class's free count. true when it set it; throws for a block past
+        the class's mapped end (a record names only blocks of files whose growth was forced, force-grown!)."
+       [^JvmSlabCtx ctx slab-offset]
+       (let [ci (decode-class-idx slab-offset)
+             bi (decode-block-idx slab-offset)]
+         (when (< ci OVERFLOW_CLASS_IDX)
+           (when-not (< bi (aget ^ints (field ctx total-blocks) ci))
+             (throw (ex-info "eve: a logged block past its slab class's end" {:class ci :block bi})))
+           (when (slab/bitmap-alloc-cas! (aget ^objects (field ctx bitmap-regions) ci)
+                                         (aget ^ints (field ctx bitmap-offsets) ci) bi)
+             (slab/region-sub-i32! (aget ^objects (field ctx regions) ci) d/SLAB_HDR_FREE_COUNT 1)
+             true))))
+
      (defn make-jvm-slab-ctx
        "Build a JvmSlabCtx from vectors of data regions and bitmap regions.
         Indices 0-5: bitmap slab classes. Index 6 (optional): coalescing overflow.
@@ -1337,6 +1377,7 @@
                                                                      (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-flags-regions ci)))
                                  new-desc-p (region/open-mmap-region (str path ".desc-pointer")
                                                                      (d/desc-column-byte-size hdr-total) (assoc opts :reuse-from (aget desc-pointer-regions ci)))]
+                             (force-grown! new-region new-bm new-desc new-desc-f new-desc-p)
                              (aset regions ci new-region)
                              (aset bitmap-regions ci new-bm)
                              (aset desc-regions ci new-desc)
@@ -1362,20 +1403,44 @@
                                (aset regions OVERFLOW_CLASS_IDX new-r)
                                (slab/regions-changed! ctx)))))))))))))))
 
+     (defn- ctx-file-paths
+       "The files of ctx's slab classes CLASSES — each bitmap class's data, bitmap and three descriptor-column files,
+        the coalesced class's one file — for eve.fsync; nil for a heap ctx or a Lustre domain (forced region by
+        region: a Lustre mount is neither ext4 nor xfs)."
+       [^JvmSlabCtx ctx classes]
+       (let [^objects fps (field ctx file-paths)
+             ^objects bps (field ctx bitmap-paths)]
+         (when (and fps (some? (aget fps 0)) (not (region/lustre-region? (aget ^objects (field ctx regions) 0))))
+           (into []
+                 (mapcat (fn [ci]
+                           (when-let [p (when (< ci (alength fps)) (aget fps ci))]
+                             (if (< ci OVERFLOW_CLASS_IDX)
+                               [p (aget bps ci) (str p ".desc-count") (str p ".desc-flags") (str p ".desc-pointer")]
+                               [p]))))
+                 classes))))
+
      (defn sync-jvm-slab-regions!
        "Force every region the JVM slab ctx holds — the slab data regions,
-        the allocator bitmap regions and the descriptor-table regions — to
-        durable storage (eve.mem/sync-region!: a region that cannot force,
-        a heap region, answers nil). The durability spike's commit ordering
-        calls this before a root pointer is published; eve.atom/sync!
-        calls it for the whole domain."
+        the allocator bitmap regions and the three descriptor-column regions
+        (the table, the flags and the pointer columns: on an mmap domain the
+        last two are files of their own) — to durable storage
+        (eve.mem/sync-region!: a region that cannot force, a heap region,
+        answers nil). The whole-domain force: a batch journal flush,
+        eve.atom/sync! and every checkpoint. (H3, eve-mmap-journal-plan
+        §1.4: the flags and pointer columns were missing here, so a whole-
+        domain force left them in the page cache while sync-jvm-touched-
+        classes! forced them.)"
        [sio]
-       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
-         (doseq [^objects arr [(field ctx regions) (field ctx bitmap-regions) (field ctx desc-regions)]
-                 :when arr
-                 r arr
-                 :when r]
-           (mem/sync-region! r))))
+       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)
+             paths (ctx-file-paths ctx (range (alength ^objects (field ctx regions))))]
+         ;; option 1 (eve.fsync): the files written back and made durable with one flush where that is safe
+         (when-not (and (seq paths) (fsync/sync-files! paths))
+           (doseq [^objects arr [(field ctx regions) (field ctx bitmap-regions) (field ctx desc-regions)
+                                 (field ctx desc-flags-regions) (field ctx desc-pointer-regions)]
+                   :when arr
+                   r arr
+                   :when r]
+             (mem/sync-region! r)))))
 
      (defn sync-jvm-touched-classes!
        "Force, per slab class in classes, that class's data region, bitmap
@@ -1385,14 +1450,16 @@
         the flags/pointer column regions are their own files and ARE
         forced here; the whole-slab form never forced them.)"
        [sio classes]
-       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
+       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)
+             paths (ctx-file-paths ctx classes)]
+         (when-not (and (seq paths) (fsync/sync-files! paths))
          (doseq [ci classes
                  ^objects arr [(field ctx regions) (field ctx bitmap-regions)
                                (field ctx desc-regions) (field ctx desc-flags-regions)
                                (field ctx desc-pointer-regions)]
                  :when (and arr (< ci (alength arr)))]
            (when-let [r (aget arr ci)]
-             (mem/sync-region! r)))))
+             (mem/sync-region! r))))))
 
      ;; -----------------------------------------------------------------------
      ;; Heap-Backed Slab Lifecycle  (JVM only)
@@ -1965,6 +2032,29 @@
       (ctx-allocated? ctx slab-offset)
       (if-let [f (host-op :allocated?)] (f ctx slab-offset) false))))
 
+(defn mark-allocated!
+  "Recovery's replay of a redo record (eve.atom, jlog v2): the block at slab-offset marked allocated in its class's
+   bitmap when it is not (ctx-mark-allocated!; the process slab's :mark-allocated! where it is the domain). true when
+   it set the bit."
+  [sio slab-offset]
+  (let [ctx (slab/domain-ctx (domain-root sio))]
+    (if (instance? JvmSlabCtx ctx)
+      (ctx-mark-allocated! ctx slab-offset)
+      (if-let [f (host-op :mark-allocated!)] (f ctx slab-offset) false))))
+
+(def ^:dynamic *inplace*
+  "Bound by a redo-log commit attempt (eve.atom, jlog v2) to an atom of a set: each block an eve-deftype set! or cas!
+   writes in place is noted in it (note-write!), so a commit that wrote into a block it did not allocate takes the
+   forced fallback — a record carries the bytes of the commit's own new blocks, never of a block other values share."
+  nil)
+
+(defn note-write!
+  "An eve-deftype field of the block at off is about to be written in place (the set!/cas! rewriters emit this)."
+  [off]
+  (when-let [w *inplace*]
+    (swap! w conj (bit-and (long off) 0xFFFFFFFF)))
+  nil)
+
 (defn shared-domain?
   "True when sio's domain is files other processes map (an mmap domain): eve's
    codec never writes a reference there (FORMAT-DECISIONS.md §9). A heap
@@ -2176,6 +2266,12 @@
                            desc-count-region (region/open-mmap-region (str (nth slab-paths i) ".desc-count") (:desc-column-bytes layout) opts)
                            desc-flags-region (region/open-mmap-region (str (nth slab-paths i) ".desc-flags") (:desc-column-bytes layout) opts)
                            desc-pointer-region (region/open-mmap-region (str (nth slab-paths i) ".desc-pointer") (:desc-column-bytes layout) opts)]
+                       ;; every page written once, so the new files have no hole (eve.fsync: one flush for many files)
+                       (when-not lustre?
+                         (fill-zero! region (:data-bytes layout))
+                         (fill-zero! bm-region (:bitmap-bytes layout))
+                         (doseq [r [desc-count-region desc-flags-region desc-pointer-region]]
+                           (fill-zero! r (:desc-column-bytes layout))))
                        (mem/-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
                        (mem/-store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
                        (mem/-store-i32! region d/SLAB_HDR_TOTAL_BLOCKS init-blocks)
@@ -2207,6 +2303,7 @@
            (if create?
              (let [layout (coalesc/coalesc-layout coalesc/INITIAL_DATA_SIZE coalesc-descriptors)
                    r      (region/open-mmap-region coalesc-path (:total-bytes layout) opts)]
+               (when-not lustre? (fill-zero! r (:total-bytes layout)))
                (coalesc/init-coalesc-region! r coalesc/INITIAL_DATA_SIZE coalesc-descriptors)
                r)
              (let [peek     (region/open-mmap-region coalesc-path 64 opts)

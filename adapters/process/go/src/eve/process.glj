@@ -52,6 +52,18 @@
 (defn file-exists? [path]
   (let [[_ err] (os.Stat path)] (nil? err)))
 
+(defn file-size
+  "The size in bytes of the file at path, or nil when there is none."
+  [path]
+  (let [[fi err] (os.Stat path)] (when (nil? err) (.Size fi))))
+
+(defn rename-file!
+  "Rename the file at from to to (replacing a file at to): one step on the host's filesystem; a failure throws."
+  [from to]
+  (when-let [err (os.Rename from to)]
+    (throw (ex-info (str "eve.process: rename " from " -> " to ": " err) {:from from :to to})))
+  nil)
+
 (defn create-exclusive!
   "Create the file at path, empty, if no file is there — one atomic step against every other process (O_CREAT|O_EXCL):
    true for the process that created it, false when it already existed (an mmap domain's creator is the one that gets

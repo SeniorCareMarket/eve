@@ -39,17 +39,18 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
 ### `persistent-atom-domain`
 
 ```text
-(persistent-atom-domain base-path & {:keys [capacities lustre? durable? journal? journal-batch
-                                             journal-window-ms coalesc-descriptors mem-budget
-                                             segment-bytes]})
+(persistent-atom-domain base-path & {:keys [capacities lustre? durable? journal-batch
+                                             journal-window-ms jlog-slots
+                                             coalesc-descriptors mem-budget segment-bytes]})
 ```
 
 - `:capacities` — a map from class index to bytes: each class's initial size.
 - `:lustre? true` uses the fcntl byte-range-lock region, for file systems without cross-node atomics.
 - `:durable?` (default true) — durable commits. `false` is the non-durable comms form: no journal, no
   forces, `sync!` is the caller's explicit barrier.
-- `:journal?` — the disk tier is journaled by default (see *Journal durability*, below); `false` keeps
-  durable commits without the journal file, carried by the pre-CAS sweep + root-range force alone.
+- The disk tier is journaled whenever it is durable (see *Journal durability*, below): `:journal-batch` (default 1:
+  every commit durable when `swap!` returns) and `:journal-window-ms` batch the journal's forces; `:jlog-slots` (a power
+  of two, default 1024) sizes the log when the domain is created.
 - `:mem-budget` — bytes: caps the domain's total region growth (see *Tiers and the memory budget*).
 - `:segment-bytes` — a power of two (default 256 MiB): the region mapping window (see *Segmentation*).
 - Which process **creates** a domain is decided by one atomic exclusive create of `<base>.root`
@@ -87,17 +88,37 @@ The window is `:segment-bytes`, an open-time parameter (a power of two, 4096..2^
 256 MiB). It is presentation, not format — stored nowhere in the domain's files — so processes may
 join the same domain with different windows.
 
-### Journal durability and the retention floor
+### Journal durability
 
-A disk domain carries `<base>.journal` (the disk tier is journaled by design), written through the host's
-`eve.journal-file` adapter (`adapters/journal-file/`): the shared code in `src/eve/atom.cljc` owns the sequence —
-lock, sweep, append, force — and the adapter owns only the file, its lock and its forces. Each record is one epoch
-and the atom table that epoch published, so recovery installs the newest valid record whole. The domain keeps a
-**retention floor**: the epoch the journal pins against reclamation. It is set at recovery, advanced at checkpoint
-— where truncation rewrites the newest valid record as the journal's sole anchor record and moves the floor to the
-anchor's epoch — and advanced by **flush-advance**: every flush records the newest durably appended epoch, and the
-next flush moves the floor to it. Blocks a still-recoverable epoch needs are therefore never reclaimed out from
-under the journal.
+A disk domain carries `<base>.jlog` (the disk tier is journaled by design): the commit log, `eve.jlog`
+(`src/eve/jlog.cljc`), one implementation on every host. It is a fixed-size file mapped like the root (the same
+`region/open-mmap-region`, the same native binding per host) — a header page, a reservation state per slot, and a
+ring of 4 KiB record slots — and it is coordinated only by CAS on mapped words, as the atom table is: no file lock.
+It is a **redo log** (version 2, `doc/jlog-redo-spec.md`): a commit forces no slab file. It reserves its log seq
+after reading the old root and before its CAS (so log order extends happens-before), CASes the root and bumps the
+epoch, writes one record — the delta (atom slot, old and new root) and the redo of what it wrote: its new blocks'
+bytes, their bitmap bits, flags and pointer columns, and the rows its holds touched, CRC-32 checked — then waits
+until the log's prefix watermark passes it. The watermark's msync is the commit point and the commit's one device
+flush; concurrent commits share it (group commit). Only then is the old root let go, so no block a durable state
+reaches is ever freed. A redo past one 4 KiB slot is written over a run of consecutive slots, forced by the same
+one msync. A commit whose redo would pass a quarter of the ring, that allocates in the coalesced class, or that wrote
+in place into a block it did not allocate (an eve-deftype field inside the swap) forces its blocks before its CAS
+instead and writes a delta-only record.
+
+Recovery (an open no live process holds) takes the root's hold word as its recovery hold, reads the newest anchor
+record and the consecutive valid records after it (the prefix: a missing or torn record ends it — no commit after
+it was acknowledged), folds their deltas over the anchor's table, replays their redo, pins every row a replayed
+record names (count := held for ever: a count may err high, a leak, never low), forces the domain, installs the
+table, voids the records past the prefix and appends a fresh anchor. A waiter that finds a dead writer's unwritten
+slot at the watermark forces the whole domain and writes a VOID there. A checkpoint (`sync!`, close, half the ring
+past the newest anchor) waits for the watermark, forces the whole domain and appends an anchor folded from the
+ring; nothing is truncated. A domain written by a pre-jlog build (`<base>.journal`, EVJ1) is migrated by the first open
+no other process holds: its newest record (by epoch, a legacy record never older than the root) is installed, and
+the file is renamed `<base>.journal.migrated`. The design and its proof: `doc/jlog-redo-spec.md` (it follows eve.db.ds
+`doc/perf/eve-mmap-journal-plan.md`, whose snapshot log it replaces).
+
+Reclamation needs no pin beyond the readers': an old root is let go only after the commit that replaced it is
+durable, so no block a recoverable state reaches is ever freed.
 
 ### Tiers and the memory budget
 
