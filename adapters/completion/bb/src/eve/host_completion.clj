@@ -1972,8 +1972,15 @@
     (map-entry? x) (clojure.lang.MapEntry. (host-form (key x)) (host-form (val x)))
     (record? x) x
     (map? x) (if (identical? (class x) sci-map-class) x
-                 (persistent! (reduce-kv (fn [m k v] (assoc! m (host-form k) (host-form v)))
-                                         (transient (sci-empty x)) x)))
+                 ;; PersistentTreeMap (and any other map whose empty is not
+                 ;; IEditableCollection) cannot be transient; walk with assoc.
+                 ;; The set arm already special-cases (sorted? x).
+                 (let [empty-m (sci-empty x)]
+                   (if (instance? clojure.lang.IEditableCollection empty-m)
+                     (persistent! (reduce-kv (fn [m k v] (assoc! m (host-form k) (host-form v)))
+                                             (transient empty-m) x))
+                     (reduce-kv (fn [m k v] (assoc m (host-form k) (host-form v)))
+                                empty-m x))))
     (vector? x) (mapv host-form x)
     (set? x) (if (sorted? x) x (into #{} (map host-form) x))
     (seq? x) (apply list (map host-form x))
