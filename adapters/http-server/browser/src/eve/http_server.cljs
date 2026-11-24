@@ -41,7 +41,10 @@
 ;; Small shapes
 ;; ---------------------------------------------------------------------------
 
-(defn- page? [] (exists? js/document))
+(defn- page?
+  "On the page's own thread (a worker under eve.dom has a proxy document, but is still a worker)."
+  []
+  (and (exists? js/document) (not (exists? js/WorkerGlobalScope))))
 
 (defn- endpoint?
   "This heap is the page's (thread 0, the only one with a document)."

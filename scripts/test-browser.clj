@@ -12,7 +12,9 @@
 ;;   ~/.cache/ms-playwright on Linux), EVE_BROWSER_TIMEOUT_S (default 300).
 ;;   EVE_BROWSER_PERF=1: eve's performance suite instead (the :eve-perf-browser build, eve.runner.perf-browser-main),
 ;;   its lines printed. EVE_BROWSER_OPFS=1: the OPFS disk tier's suites instead (the :eve-opfs-browser build,
-;;   eve.runner.opfs-browser-main: the page mounts the OPFS pool first).
+;;   eve.runner.opfs-browser-main: the page mounts the OPFS pool first). EVE_BROWSER_SUITE=dom (bb test:browser:dom):
+;;   eve.dom's conformance instead (the :eve-dom-browser build, eve.runner.dom-browser-main: the program's main a
+;;   worker driving the page's DOM).
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.edn :as edn]
@@ -22,8 +24,10 @@
 (def eve (str (fs/absolutize ".")))
 (def perf? (some? (System/getenv "EVE_BROWSER_PERF")))
 (def opfs? (and (not perf?) (some? (System/getenv "EVE_BROWSER_OPFS"))))
-(def build (cond perf? "eve-perf-browser" opfs? "eve-opfs-browser" :else "eve-thread-browser"))
-(def out (str eve (cond perf? "/target/perf-browser" opfs? "/target/opfs-browser" :else "/target/thread-browser")))
+(def dom? (= "dom" (System/getenv "EVE_BROWSER_SUITE")))
+(def build (cond perf? "eve-perf-browser" opfs? "eve-opfs-browser" dom? "eve-dom-browser" :else "eve-thread-browser"))
+(def out (str eve (cond perf? "/target/perf-browser" opfs? "/target/opfs-browser" dom? "/target/dom-browser"
+                        :else "/target/thread-browser")))
 (def public (str out "/public"))
 
 (defn- step [& xs] (apply println "test:browser:" xs) (flush))

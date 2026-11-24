@@ -55,7 +55,10 @@
 ;; that must reach a worker before it runs, e.g. eve.opfs's file pool (the pool-boot mount)
 (defonce ^:private shared-js #js {})
 
-(defn- can-block? [] (not (exists? js/document)))
+(defn- can-block?
+  "Off the page's own thread: a worker (whose globalThis may carry an eve.dom proxy document), or no document at all."
+  []
+  (or (exists? js/WorkerGlobalScope) (not (exists? js/document))))
 
 (defn- shared [sab] {:sab sab :ctl (js/Int32Array. sab 0 CTL-WORDS) :bytes (js/Uint8Array. sab)})
 
@@ -65,6 +68,39 @@
           {:self 0 :starter nil :local #queue []})))
 
 (declare pump!)
+
+;; Hooks for other browser features (eve.dom): tagged worker <-> page messages beside the mailboxes, and the page's
+;; Worker objects by thread id. (What every worker receives at boot is share! / shared-of, below.)
+(defonce ^:private page-handlers (atom {}))
+(defonce ^:private worker-handlers (atom {}))
+(defonce ^:private workers (atom {}))
+
+(defn on-worker-message!
+  "On the page: a message a worker posts to the page (self.postMessage) whose eveTag is tag goes to (f thread-id data).
+   Untagged messages still go to globalThis.__eve_worker_message."
+  [tag f]
+  (swap! page-handlers assoc (str tag) f)
+  nil)
+
+(defn post-to-worker!
+  "On the page: post msg (with an optional transfer list) to the worker of thread id; false when there is none."
+  ([id msg] (post-to-worker! id msg nil))
+  ([id msg transfer]
+   (if-let [^js w (get @workers id)]
+     (do (if transfer (.postMessage w msg transfer) (.postMessage w msg)) true)
+     false)))
+
+(defn on-page-message!
+  "In a worker: a message from the page whose eveTag is tag goes to (f data)."
+  [tag f]
+  (when (empty? @worker-handlers)
+    (.addEventListener js/self "message"
+                       (fn [^js e]
+                         (let [d (.-data e)]
+                           (when-let [h (and d (get @worker-handlers (.-eveTag d)))]
+                             (h d))))))
+  (swap! worker-handlers assoc (str tag) f)
+  nil)
 
 (defn- mem
   "The mailboxes (made on first use, by the page, which then pumps its spawn ring)."
@@ -209,7 +245,7 @@
     (put! addr (try (wire/encode msg)
                     (catch :default _
                       (throw (ex-info "eve.thread-host: a message to another heap must be data (eve.wire: one flat chunk): a host object is refused"
-                        {:eve.thread/refused :host-object}))))))
+                                      {:eve.thread/refused :host-object}))))))
   nil)
 
 (defn receive!
@@ -260,6 +296,11 @@
           (throw (ex-info "eve.thread-host: no kernel: no manifest.edn beside any <script src> names a module" {})))
         (:kernel (swap! state assoc :kernel found)))))
 
+(defn kernel
+  "The program's kernel URL, as a new worker of this adapter loads it (on the page: from the build's manifest.edn)."
+  []
+  (kernel-url))
+
 (def ^:private bootstrap
   (str "self.addEventListener('message', function boot(e) {"
        "  var d = e.data; if (!d || !d.eveThreadBoot) return;"
@@ -279,7 +320,8 @@
   "On the page: create the worker a start asked for ({:id :starter :entry :boot :started}). A message the worker posts
    to its parent (self.postMessage: eve's own threads talk through the mailboxes, never so) goes to the page's hook
    globalThis.__eve_worker_message, when one is set: the way another feature serves its workers from the page (the
-   http feature's batched requests)."
+   http feature's batched requests); one carrying an eveTag a feature registered (on-worker-message!) goes to that
+   feature instead. The worker is kept by thread id (post-to-worker!) and boots with what the page shared (share!)."
   [{:keys [id starter entry boot started]}]
   (let [{:keys [ctl sab]} (mem)
         url (.createObjectURL js/URL
@@ -287,6 +329,7 @@
                                         #js {:type "text/javascript"}))
         w (js/Worker. url)]
     (js/setTimeout #(.revokeObjectURL js/URL url) 60000)
+    (swap! workers assoc id w)
     (set! (.-onerror w)
           (fn [e]
             ;; the backstop: an error the worker did not report, to its starter
@@ -298,9 +341,13 @@
                                :message (str (.-message e))
                                :data nil}}))))
     (.addEventListener w "message"
-                       (fn [e]
-                         (when-let [h (.-__eve_worker_message js/globalThis)]
-                           (h e))))
+                       (fn [^js e]
+                         (let [d (.-data e)
+                               tagged (when (and d (.-eveTag d)) (get @page-handlers (.-eveTag d)))]
+                           (if tagged
+                             (tagged id d)
+                             (when-let [h (.-__eve_worker_message js/globalThis)]
+                               (h e))))))
     (.postMessage w
                   #js {:eveThreadBoot true
                        :init #js {:sab sab
@@ -341,15 +388,22 @@
 (defn run-thread!
   "In a worker this adapter started: run its entry, tell its starter how it ended, and close (the page created every
    worker, so no other thread is this one's child; a dedicated worker left open stays resident until the page goes);
-   true. Elsewhere: false. The program's entry point calls it first (its workers run the whole program)."
+   true. Elsewhere: false. The program's entry point calls it first (its workers run the whole program). An entry that
+   answers a thenable (a Promise) keeps its worker, and the worker's event loop, until that settles: an app's main
+   worker under eve.dom answers one so that page events still reach it."
   []
   (if-let [d (init-data)]
     (let [sym (symbol (.-entry d))
-          f (js/goog.getObjectByName (str (munge (namespace sym)) "." (munge (name sym))))]
-      (js/Atomics.store (:ctl (mem)) SPAWN-MS (- (js/Date.now) (.-started d)))
-      (report-exit! (try (f (reader/read-string (.-boot d))) :normal
-                         (catch :default e (error-data e))))
-      (.close js/self)
+          f (js/goog.getObjectByName (str (munge (namespace sym)) "." (munge (name sym))))
+          _ (js/Atomics.store (:ctl (mem)) SPAWN-MS (- (js/Date.now) (.-started d)))
+          [ok? v] (try [true (f (reader/read-string (.-boot d)))]
+                       (catch :default e [false (error-data e)]))]
+      (if (and ok? (some? v) (fn? (.-then v)))
+        (.then v
+               (fn [_] (report-exit! :normal) (.close js/self))
+               (fn [e] (report-exit! (error-data e)) (.close js/self)))
+        (do (report-exit! (if ok? :normal v))
+            (.close js/self)))
       true)
     false))
 

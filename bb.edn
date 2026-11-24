@@ -259,6 +259,8 @@
                        "read" (let [got (na/deref ra)] (prn {:op :read :ok (= want got)}))))}
   test:browser {:doc "The thread feature's conformance in headless Chromium (hosts.edn :browser; scripts/test-browser.clj)"
                 :task (load-file "scripts/test-browser.clj")}
+  test:browser:dom {:doc "eve.dom's conformance in headless Chromium: main a worker driving the page's DOM (scripts/test-browser.clj)"
+                    :task (shell {:extra-env {"EVE_BROWSER_SUITE" "dom"}} "bb" "test:browser")}
   test:clje {:doc "The shared (.cljc) tests on clojerl (eve's NIF is built on first load into adapters/core/beam/target/clje/)"
              :task (apply shell "clojerl" (concat (mapcat (fn [r] ["-pa" r]) (roots :clje "test"))
                                                   ["-m" "eve.runner.clje-main" "test"] *command-line-args*))}}}

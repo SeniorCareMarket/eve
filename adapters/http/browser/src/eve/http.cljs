@@ -94,7 +94,10 @@
 (def ^:private WAIT-MS 60000)
 (def ^:private PROBE-MS 3000)
 
-(defn- page? [] (exists? js/document))
+(defn- page?
+  "On the page's own thread (a worker under eve.dom has a proxy document, but is still a worker)."
+  []
+  (and (exists? js/document) (not (exists? js/WorkerGlobalScope))))
 
 (defn- fetch-one
   "A request fetched on the page: a promise of its answer as plain JS ({status headers body} or {error})."
