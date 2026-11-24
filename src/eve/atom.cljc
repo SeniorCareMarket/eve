@@ -1400,11 +1400,25 @@
                             (let [h @view-read-hook]
                               (if (fn? h) h (do (reset! view-read-hook ::none) nil))))))))
 
+(defn- answer-epoch
+  "The epoch a view of the root at ptr (atom slot word ptr-off) may pin, read
+   under the caller's pin at pin-e: the epoch now when the slot still holds ptr
+   after that load — a commit that unlinks the root comes later and stamps
+   what it lets go above it — else pin-e, loaded before ptr was. Not the epoch
+   now alone: two commits between ptr's load and the view's pin put it above
+   the stamp of the root they let go, and the flush freed the root under the
+   view (jolt×2 shootout: \"Unknown EVE type tag\" after a commit). The
+   caller's pin keeps the root's blocks from reuse meanwhile, so a slot that
+   holds ptr again holds the same root."
+  [root-r pin-e ptr-off ptr]
+  (let [e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+    (if (== ptr (mem/-load-i32 root-r ptr-off)) e pin-e)))
+
 (defn- read-answer
   "The answer a read gives for raw, read now under the caller's pin: a view
-   holding a pin of its own (from the current epoch) when views are built
-   here, else raw delivered flat."
-  [ds atom-slot-idx raw]
+   holding a pin of its own at pin-e (answer-epoch) when views are built here,
+   else raw delivered flat."
+  [ds atom-slot-idx raw pin-e]
   (let [root-r (:root-r ds)]
     (if-let [h (view-read-fn)]
       (let [epoch (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
@@ -1412,7 +1426,7 @@
       ;; answering its release), or per-access pins (:enter / :exit) checked
       ;; against the epoch the read was taken at
         (h raw {:epoch epoch
-                :hold (fn [] (view-pin! ds epoch) (fn [] (view-unpin! ds epoch)))
+                :hold (fn [] (view-pin! ds pin-e) (fn [] (view-unpin! ds pin-e)))
                 :enter (fn [] (let [e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
                                 (pin-epoch! ds e)
                                 e))
@@ -1708,13 +1722,15 @@
    the GC collects it (eve.view)."
   [{:keys [root-r sio] :as ds} atom-slot-idx]
   (refresh-slabs! ds)
-  (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
-  (try
-    (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
-      (refresh-slabs! ds)
-      (read-answer ds atom-slot-idx (read-root-value sio ptr)))
-    (finally
-      (unpin-epoch! ds))))
+  (let [pin-e (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)]
+    (pin-epoch! ds pin-e)
+    (try
+      (let [ptr (mem/-load-i32 root-r (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET))]
+        (refresh-slabs! ds)
+        (read-answer ds atom-slot-idx (read-root-value sio ptr)
+                     (answer-epoch root-r pin-e (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET) ptr)))
+      (finally
+        (unpin-epoch! ds)))))
 
 (defn- flat-deref
   "The atom's value as a flat object (FLAT-IN-ATOM R5): read under a
@@ -1911,9 +1927,9 @@
    args
    exclusive?
    want-vals?]
-  (let [root-r (:root-r ds) sio (:sio ds) durable-commits? (:durable-commits? ds) journal (:journal ds)]
-    (refresh-slabs! ds)
-    (pin-epoch! ds (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))
+  (let [root-r (:root-r ds) sio (:sio ds) durable-commits? (:durable-commits? ds) journal (:journal ds)
+        pin-e (do (refresh-slabs! ds) (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))]
+    (pin-epoch! ds pin-e)
   ;; the touched set feeds the durable sweeps alone (every read of it below is inside a durable-commits? arm):
   ;; an in-memory domain binds none, and tally/note-touch! is one nil check (it was a set conj per mutation)
     ;; jolt: an in-memory domain under no outer touched set skips the binding (its value inside is nil either way;
@@ -1946,7 +1962,7 @@
                             ;; model: what leaves an atom is flat), under this attempt's pin
                           (let [delivery (let [w? (or want-vals? (watched? ds atom-slot-idx))
                                                dv (when w? (deliver-value ds atom-slot-idx old-val))]
-                                           [dv dv (read-answer ds atom-slot-idx old-val)])]
+                                           [dv dv (read-answer ds atom-slot-idx old-val (answer-epoch root-r pin-e ptr-off old-ptr))])]
                               ;; nothing published: whatever f allocated on the way to the old value is held by nothing
                             (tally/free-unreached! sio (alloc/logged-allocs lsio))
                             (alloc/stop-logging! lsio)
@@ -2019,7 +2035,7 @@
                                       new-raw (read-root-value sio new-ptr)
                                       delivery [(when w? (deliver-value ds atom-slot-idx old-val))
                                                 (when w? (deliver-value ds atom-slot-idx new-raw))
-                                                (read-answer ds atom-slot-idx new-raw)]]
+                                                (read-answer ds atom-slot-idx new-raw (answer-epoch root-r pin-e ptr-off new-ptr))]]
                                   (alloc/stop-logging! lsio)
                                   [:ok new-val delivery]))
                               (let [offs (alloc/logged-allocs lsio)]
