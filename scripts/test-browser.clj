@@ -116,10 +116,16 @@
             (newest full)
             (newest shell)))))
 
-(def stop (http/run-server serve {:ip "127.0.0.1" :port 0 :legacy-return-value? false}))
+;; EVE_BROWSER_PORT: a fixed port (an origin is its port too: the relaunch test's two runs share one OPFS)
+(def stop (http/run-server serve {:ip "127.0.0.1" :port (parse-long (or (System/getenv "EVE_BROWSER_PORT") "0"))
+                                  :legacy-return-value? false}))
 (def port (http/server-port stop))
-(def profile (str (fs/create-temp-dir (cond-> {:prefix "eve-chrome-"}
-                                        (System/getenv "TMPDIR") (assoc :dir (System/getenv "TMPDIR"))))))
+;; EVE_BROWSER_PROFILE: the browser's profile dir, kept after the run (the OPFS relaunch test's two runs share it)
+(def kept-profile (System/getenv "EVE_BROWSER_PROFILE"))
+(def profile (if kept-profile
+               (str (fs/create-dirs kept-profile))
+               (str (fs/create-temp-dir (cond-> {:prefix "eve-chrome-"}
+                                          (System/getenv "TMPDIR") (assoc :dir (System/getenv "TMPDIR")))))))
 (step (str "serving on 127.0.0.1:" port "; opening headless " (or (System/getenv "EVE_BROWSER") "Chromium")))
 (def page-url (str "http://127.0.0.1:" port "/index.html" (some->> (System/getenv "EVE_BROWSER_QUERY") (str "?"))))
 (def engine (System/getenv "EVE_BROWSER"))
@@ -129,7 +135,7 @@
     (p/process {:out :string :err :string :dir eve}
                "node" "scripts/browser-open.cjs" engine page-url
                ;; the OPFS page needs a persistent profile (WebKit has no OPFS in an ephemeral context)
-               (if opfs? profile ""))
+               (if (or opfs? kept-profile) profile ""))
     (apply p/process {:out :string :err :string}
            (or (find-chrome)
                (throw (ex-info "test:browser: no Chromium found — set EVE_CHROME or run: npx playwright install chromium" {})))
@@ -146,7 +152,7 @@
 (p/destroy-tree chrome)
 (deref chrome 10000 nil)
 (http/server-stop! stop)
-(try (fs/delete-tree profile) (catch Exception _ nil))
+(when-not kept-profile (try (fs/delete-tree profile) (catch Exception _ nil)))
 
 (let [log (str (:err (deref chrome 1000 nil)))]
   ;; Chromium's log, the page's and its workers' console lines among it

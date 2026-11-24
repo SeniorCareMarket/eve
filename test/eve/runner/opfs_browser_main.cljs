@@ -73,6 +73,49 @@
                        (post! {:op :died :notice m :main rows})))))
              20))))
 
+;; ---- relaunch (W11): ?eve-opfs-relaunch=write commits and the browser is killed with the domain open;
+;; =read, the browser relaunched on the same profile, finds every commit
+
+(defn relaunch-write
+  "A worker's entry: open the relaunch domain, commit :count up 7 times, report, and never close (the browser is
+   killed with it open)."
+  [{:keys [reply]}]
+  (let [_d (atom/persistent-atom-domain "/relaunch/d")
+        a (atom/persistent-atom {:id :eve/main :persistent "/relaunch/d"} {:count 0})]
+    (dotimes [_ 7] (swap! a update :count inc))
+    (h/send! reply {:op :relaunch :count (:count @a)})
+    (loop [] (when-not (= :eve.thread/stop (h/receive! -1)) (recur)))))
+
+(defn relaunch-read
+  "A worker's entry: open the relaunch domain (a fresh root: recovered), report :count."
+  [{:keys [reply]}]
+  (try
+    (let [d (atom/persistent-atom-domain "/relaunch/d")
+          a (atom/persistent-atom {:id :eve/main :persistent "/relaunch/d"} nil)
+          n (:count @a)]
+      (atom/close-atom-domain! d)
+      (h/send! reply {:op :relaunch :count n}))
+    (catch :default e (h/send! reply {:op :relaunch :error (str e)}))))
+
+(defn- relaunch-page! [mode]
+  (-> (boot/boot! {:opfs {:root "eve-opfs-relaunch"}})
+      (.then (fn [_]
+               (h/start-threads! 1 (if (= "write" mode) 'eve.runner.opfs-browser-main/relaunch-write
+                                       'eve.runner.opfs-browser-main/relaunch-read)
+                                 {:reply (h/self)} {})
+               (let [timer (atom nil)]
+                 (reset! timer
+                         (js/setInterval
+                          (fn []
+                            (let [m (h/receive! 0)]
+                              (when (and (map? m) (= :relaunch (:op m)))
+                                (js/clearInterval @timer)
+                                (post! {:op :suite :summary {:test 1 :pass (if (= 7 (:count m)) 1 0)
+                                                             :fail (if (= 7 (:count m)) 0 1) :error 0}
+                                        :relaunch mode :got m :main {:count7 (= 7 (:count m))}}))))
+                          20)))))
+      (.catch (fn [e] (post! {:op :mount-failed :message (str e) :main {:mounted false}})))))
+
 (defn- start-page!
   "The page boots as a program would (eve.opfs.boot/boot!): isolated (served so, or by eve-sw.js after one reload),
    the pool mounted, then the suite's worker. :isolated-by says which."
@@ -181,7 +224,9 @@
         (if (= "1" (.get q "follower"))
           (relay-follower-page! (.get q "root"))
           (relay-page!))
-        (init-isolated!)))))
+        (if-let [mode (.get q "eve-opfs-relaunch")]
+          (relaunch-page! mode)
+          (init-isolated!))))))
 
 (defn- init-isolated! []
   (when-not (h/run-thread!)
