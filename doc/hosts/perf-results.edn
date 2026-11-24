@@ -82,7 +82,7 @@
    :lines
    [{:perf :atom-swap-counter, :ops 256, :ms 1346, :ns-per-op 5257812}
     {:perf :atom-deref-small, :ops 2048, :ms 1126, :ns-per-op 549804}
-    {:perf :atom-swap-map-1k, :ops 128, :ms 1577, :ns-per-op 12320312}
+    {:perf :atom-swap-map-1k, :ops 256, :ms 1951, :ns-per-op 7621093}
     {:perf :atom-deref-map-1k, :ops 4096, :ms 2232, :ns-per-op 544921}
     {:perf :atom-$-get-map-1k, :ops 2048, :ms 1435, :ns-per-op 700683}
     {:perf :atom-reset-vec-1k, :ops 2, :ms 1009, :ns-per-op 504500000}

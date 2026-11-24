@@ -53,7 +53,7 @@ named) and the typed-array suites.
 |---|---:|---:|---:|
 | `atom-swap-counter` | 5.3 ms | 256 | 411 |
 | `atom-deref-small` | 549.8 µs | 2048 | 202 |
-| `atom-swap-map-1k` | 12.3 ms | 128 | 2936 |
+| `atom-swap-map-1k` | 7.6 ms | 256 | 1857 |
 | `atom-deref-map-1k` | 544.9 µs | 4096 | 240 |
 | `atom-$-get-map-1k` | 700.7 µs | 2048 | 1162 |
 | `atom-reset-vec-1k` | 504.5 ms | 2 | 425 |
@@ -61,10 +61,10 @@ named) and the typed-array suites.
 | `disk-swap-counter` | 7.8 ms | 256 | 126 |
 | `thread-submit-64` | 10.6 ms | 128 | 3.5 |
 
-Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
+The `atom-swap-map-1k` cell was re-measured 2026-11-24 11:04–11:11 AM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `2b9ee135` (median of five official cells, load1 2.63–4.76). The other rows remain the 2026-11-23 8:53–9:08 PM ET run at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
 <!-- /perf:glj -->
 
-Reading it: ~410× the JVM on a counter swap (5.3 ms) and ~2,900× on a 1,000-key map swap (12.3 ms): glojure interprets its
+Reading it: ~410× the JVM on a counter swap (5.3 ms) and ~1,900× on a 1,000-key map swap (7.6 ms): glojure interprets its
 AST and a protocol call is a multimethod on class. Goroutines run the thread workload in 10.6 ms. A sorted-set build is
 5.86 s (one op).
 
