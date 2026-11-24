@@ -13,7 +13,7 @@
 
    How a worker gets the program's code — the later cljs-thread lineage's fat-kernel route: a tiny Blob bootstrap
    receives its init data, sets it on its global scope and importScripts the kernel, whose URL the page finds from
-   the build's manifest.edn (probed beside each <script src>, by synchronous XHR) and hands down, so a worker's own
+   the build's manifest.edn (probed beside each <script src>, read at load; kernel-ready) and hands down, so a worker's own
    threads start the same way. The kernel is the program itself (a build whose names stay global: :simple, no output
    wrapper); its entry point calls run-thread! first: in a thread this adapter started, it runs that thread's entry.
 
@@ -278,28 +278,63 @@
          (when (= 200 (.-status x)) (.-responseText x)))
        (catch :default _ nil)))
 
+(defn- script-bases
+  "On the page: the directory of each <script src>, where a build's manifest.edn sits."
+  []
+  (map #(subs % 0 (inc (str/last-index-of % "/")))
+       (keep #(.-src %) (array-seq (.querySelectorAll js/document "script[src]")))))
+
+(defn- manifest-kernel
+  "The kernel a manifest.edn's text names beside base: its one module, or :main; nil when it names neither."
+  [base text]
+  (let [mods (reader/read-string text)
+        m (or (when (= 1 (count mods)) (first mods))
+              (some #(when (= :main (:module-id %)) %) mods))]
+    (when m (str base (:output-name m)))))
+
+(def ^:private no-kernel "eve.thread-host: no kernel: no manifest.edn beside any <script src> names a module")
+
+;; The page reads its manifest at load, asynchronously. A synchronous XHR on the page's main thread is the fallback
+;; only: Firefox (159, measured) stalls the first request a newly installed service worker controller serves for a
+;; page's main thread — a synchronous one waits ~60 s and fails with a NetworkError (later ones, and a worker's, take
+;; milliseconds) — so a page that eve's service worker just took control of (eve.opfs.boot) could not start a worker.
+(defonce ^:private kernel-read
+  (when (and (not (ours?)) (not (can-block?)) (exists? js/fetch))
+    (let [p (reduce (fn [p base]
+                      (.then p (fn [found]
+                                 (or found
+                                     (-> (js/fetch (str base "manifest.edn"))
+                                         (.then (fn [^js r] (when (.-ok r) (.text r))))
+                                         (.then (fn [t] (when t (manifest-kernel base t))))
+                                         (.catch (fn [_] nil)))))))
+                    (js/Promise.resolve nil)
+                    (script-bases))]
+      (.then p (fn [k] (when k (swap! state #(if (:kernel %) % (assoc % :kernel k)))) k)))))
+
 (defn- kernel-url
   "The kernel a new worker loads: handed down, or (on the page) the module manifest.edn names beside a <script src> —
-   its one module, or :main."
+   its one module, or :main: read at load (kernel-ready), else now, synchronously."
   []
   (or (:kernel @state)
-      (let [srcs (keep #(.-src %) (array-seq (.querySelectorAll js/document "script[src]")))
-            found (some (fn [src]
-                          (let [base (subs src 0 (inc (str/last-index-of src "/")))]
-                            (when-let [t (fetch-text-sync (str base "manifest.edn"))]
-                              (let [mods (reader/read-string t)
-                                    m (or (when (= 1 (count mods)) (first mods))
-                                          (some #(when (= :main (:module-id %)) %) mods))]
-                                (when m (str base (:output-name m)))))))
-                        srcs)]
-        (when-not found
-          (throw (ex-info "eve.thread-host: no kernel: no manifest.edn beside any <script src> names a module" {})))
+      (let [found (some (fn [base] (some->> (fetch-text-sync (str base "manifest.edn")) (manifest-kernel base)))
+                        (script-bases))]
+        (when-not found (throw (ex-info no-kernel {})))
         (:kernel (swap! state assoc :kernel found)))))
 
 (defn kernel
   "The program's kernel URL, as a new worker of this adapter loads it (on the page: from the build's manifest.edn)."
   []
   (kernel-url))
+
+(defn kernel-ready
+  "A promise of the program's kernel URL (kernel), resolved once the page's load-time read of its manifest.edn is
+   done: a page that starts workers right after an await (a service worker taking control: eve.opfs.boot) waits on
+   it rather than read the manifest synchronously. Rejected when no manifest names a module."
+  []
+  (if-let [k (:kernel @state)]
+    (js/Promise.resolve k)
+    (-> (or kernel-read (js/Promise.resolve nil))
+        (.then (fn [k] (or k (kernel-url)))))))
 
 (def ^:private bootstrap
   (str "self.addEventListener('message', function boot(e) {"

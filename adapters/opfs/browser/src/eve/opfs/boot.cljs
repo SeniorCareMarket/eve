@@ -9,7 +9,8 @@
 
    Not isolated (W10), with eve's service worker in control: no pool on the page; the program's main worker mounts
    the relay pool itself (eve.opfs.mount/mount! in a worker of such a page) and holds eve's memory alone."
-  (:require [eve.opfs.mount :as mount]))
+  (:require [eve.opfs.mount :as mount]
+            [eve.thread-host :as h]))
 
 (def ^:private reload-key "eve.opfs/coi-reload")
 
@@ -52,6 +53,13 @@
                         (js/Promise. (fn [_ _]))))))
          (.catch (fn [_] false))))))
 
+(defn- kernel-known
+  "A promise settled once the page knows its kernel (eve.thread-host/kernel-ready), its value ignored: start then
+   reads (h/kernel) at once. Without it, the first worker start on a page eve's service worker just took control
+   of reads the manifest by a main-thread synchronous XHR, which Firefox stalls (~60 s, then a NetworkError)."
+  []
+  (-> (h/kernel-ready) (.catch (fn [_] nil))))
+
 (defn boot!
   "On the page: isolate it (isolate!; :isolate false keeps it unisolated), mount the OPFS pool (:opfs,
    eve.opfs.mount/mount!'s options), then call (:start opts) — the program's main started, its worker sharing the
@@ -63,11 +71,12 @@
       (.then (fn [iso?]
                (cond
                  iso? nil
-                 (some-> (.-serviceWorker js/navigator) .-controller) {:pool nil :relay true :started (when start (start))}
+                 (some-> (.-serviceWorker js/navigator) .-controller)
+                 (.then (kernel-known) (fn [_] {:pool nil :relay true :started (when start (start))}))
                  :else (js/Promise.reject (ex-info "eve.opfs.boot: the page is not cross-origin isolated"
                                                    {:eve.opfs/refused :not-isolated})))))
       (.then (fn [r]
                (if r
                  r
                  (-> (mount/mount! (or opfs {}))
-                     (.then (fn [p] {:pool p :started (when start (start))}))))))))
+                     (.then (fn [p] (.then (kernel-known) (fn [_] {:pool p :started (when start (start))}))))))))))

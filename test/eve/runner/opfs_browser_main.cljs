@@ -158,8 +158,7 @@
 (defn- relay-start-worker!
   "On a relay page: the worker from the kernel's URL (so eve's service worker controls it); its messages to f."
   [root follow? f]
-  (let [k (.-src (.querySelector js/document "script[src]"))   ; the build's one script (h/kernel reads its manifest:
-                                                                  ; Firefox's synchronous read of it fails here)
+  (let [k (h/kernel)   ; known by now: boot! waited on h/kernel-ready
         w (js/Worker. (str k (if (re-find #"\?" k) "&" "?") "eve-opfs-relay-worker=" (js/encodeURIComponent root)
                            (when follow? "&follow=1")))]
     (set! (.-onmessage w) (fn [e] (f (reader/read-string (.-data e)))))
