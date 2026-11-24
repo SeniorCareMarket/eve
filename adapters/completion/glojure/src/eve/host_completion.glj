@@ -972,17 +972,48 @@
    the protocol atoms, and derefing the class the symbol also names would dispatch -deref on it.)"
   (into {} (keep (fn [s] (when-let [v (resolve s)] [s (if (var? v) @v v)])) (keys completion-interface-map))))
 
-(alter-var-root #'clojure.core/instance?
-  (fn [core]
-    (fn [c x]
-      (or (core c x)
-          (boolean
-           (and (deftype-instance? x)
-                (some (fn [[s cls]]
-                        (and (identical? c cls)
-                             (let [p (resolve (:protocol (get completion-interface-map s)))]
-                               (and p (extends? @p (class x))))))
-                      iface-classes)))))))
+(def ^:private iface-sym->proto
+  "Protocol vars for completion-interface-map, resolved once at load."
+  (into {} (keep (fn [s]
+                   (when-let [p (resolve (:protocol (get completion-interface-map s)))]
+                     [s p]))
+                 (keys completion-interface-map))))
+
+;; instance? of a translated JVM interface on a deftype: only those 7
+;; classes pay the deftype/extends? walk. The first form ran
+;; deftype-instance? and walked iface-classes on every core miss — that
+;; collapsed glj atom-swap-map-1k (11.9 ms → 6.1 ms with the re-root
+;; disabled, measured quiet 2026-11-24 ET). Classes are closed over and
+;; compared by identical? (no map/vec walk of iface-classes on the miss
+;; path: a first rewrite that did was slower than unpatched main).
+(let [c-ideref (get iface-classes 'clojure.lang.IDeref)
+      c-iblock (get iface-classes 'clojure.lang.IBlockingDeref)
+      c-iatom (get iface-classes 'clojure.lang.IAtom)
+      c-iatom2 (get iface-classes 'clojure.lang.IAtom2)
+      c-ipend (get iface-classes 'clojure.lang.IPending)
+      c-iref (get iface-classes 'clojure.lang.IRef)
+      c-irefce (get iface-classes 'clojure.lang.IReference)
+      p-ideref (get iface-sym->proto 'clojure.lang.IDeref)
+      p-iblock (get iface-sym->proto 'clojure.lang.IBlockingDeref)
+      p-iatom (get iface-sym->proto 'clojure.lang.IAtom)
+      p-iatom2 (get iface-sym->proto 'clojure.lang.IAtom2)
+      p-ipend (get iface-sym->proto 'clojure.lang.IPending)
+      p-iref (get iface-sym->proto 'clojure.lang.IRef)
+      p-irefce (get iface-sym->proto 'clojure.lang.IReference)]
+  (alter-var-root #'clojure.core/instance?
+    (fn [core]
+      (fn [c x]
+        (or (core c x)
+            (boolean
+             (when-let [p (cond (identical? c c-ideref) p-ideref
+                                (identical? c c-iblock) p-iblock
+                                (identical? c c-iatom) p-iatom
+                                (identical? c c-iatom2) p-iatom2
+                                (identical? c c-ipend) p-ipend
+                                (identical? c c-iref) p-iref
+                                (identical? c c-irefce) p-irefce
+                                :else nil)]
+               (and (deftype-instance? x) (extends? @p (class x))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; reify
