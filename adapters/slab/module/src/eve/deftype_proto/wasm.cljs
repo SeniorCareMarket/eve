@@ -468,6 +468,42 @@
   []
   (fn? (.-grow (.-prototype js/SharedArrayBuffer))))
 
+(def ^:private webkit-agent?
+  (delay (let [ua (when (exists? js/navigator) (str (.-userAgent js/navigator)))]
+           (boolean (and ua (re-find #"AppleWebKit/" ua) (not (re-find #"Chrome/|Chromium/" ua)))))))
+
+(defn webkit?
+  "true in WebKit (Safari, every iOS browser, Playwright's WebKit), by its user agent: AppleWebKit without Blink's
+   Chrome/ or Chromium/. WebKit caps one process's growable SharedArrayBuffers by their maximums, not their lengths:
+   60 GiB a process, its frames and workers together, a buffer counting until it is collected (measured, WebKit 2388,
+   2026-11-24: 60 of 1 GiB reserve, the 61st throws RangeError: Out of memory)."
+  []
+  @webkit-agent?)
+
+(def ^:private webkit-slab-caps
+  "WebKit's module slab capacities, by class (webkit?): a slab's maximum is its full capacity's layout, about 12
+   bytes a block of descriptors besides its data, so the default capacities (1 GB for classes 0-2) reserve 5.70 GiB
+   a kernel, and ten kernels and a pool spent WebKit's 60 GiB. Measured (2026-11-24, every browser suite and the perf
+   suite, Chromium and WebKit): a kernel's data grew at most 32 MiB in class 0, 15 MiB in class 1, 4 in class 2 and
+   under 1 in classes 3-5. These are twice that or more: ~363 MiB a kernel with the overflow region (webkit-coalesc-cap),
+   so the 127 threads of a page and a 4 GiB OPFS pool fit (~49 GiB). An explicit :capacities to eve.process-slab/init!
+   overrides them."
+  [(* 64 1024 1024) (* 64 1024 1024) (* 32 1024 1024) (* 32 1024 1024) (* 32 1024 1024) (* 32 1024 1024)])
+
+(def ^:private webkit-coalesc-cap
+  "WebKit's overflow (class 6) region's data size (webkit-slab-caps): measured at most 0.5 MiB used."
+  (* 64 1024 1024))
+
+(defn slab-capacity
+  "Class class-idx's default capacity on this engine: default, or on WebKit at most webkit-slab-caps'."
+  [class-idx default]
+  (if (webkit?) (min default (nth webkit-slab-caps class-idx default)) default))
+
+(defn coalesc-capacity
+  "The overflow region's default data size on this engine: default, or on WebKit at most webkit-coalesc-cap."
+  [default]
+  (if (webkit?) (min default webkit-coalesc-cap) default))
+
 (defn grow-slabs?
   "Whether a module slab grows from its initial capacity (a growable SharedArrayBuffer, create-slab-memory's
    initial-bytes) by default rather than holding its full capacity from the start: in a browser (a page or a

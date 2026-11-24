@@ -148,13 +148,14 @@ cell: the browser row's `disk-swap-counter` stays n/a there, since that page has
   before any eve thread starts; a worker spawned before it has no file pool.
 - **WebKit caps a process's growable SharedArrayBuffers at 60 GiB of their maximums**, measured in Playwright's WebKit
   2388: 60 of 1 GiB fit, the 61st throws `RangeError: Out of memory`. A page and its same-origin iframes share one
-  process. Each eve worker's kernel reserves 5.70 GiB of maximums (its 8 shared memories, slabs at full capacity), and
-  each tab's OPFS pool reserves up to 4 GiB. The service-worker-isolated takeover suite (3 tabs, 8 workers) peaks at
-  ~61.6 GiB if everything is alive at once. A buffer counts until it is collected, including an ended worker's and
-  the pool's discarded probe buffers, so that suite fails now and then, with a SharedArrayBuffer `Out of memory` in its
-  `:read` worker and `c-relays` at 80. Measured 2026-11-24: 1 of 5 runs failed. Every other OPFS mode passes in
-  WebKit. WebKit also needs a persistent profile for OPFS (an ephemeral context fails with UnknownError); the runner
-  passes one.
+  process, and a buffer counts until it is collected. Full-capacity kernels (5.70 GiB of maximums each, almost all
+  slab metadata) and the pool's probe made the service-worker-isolated takeover suite fail 6 of 10 runs. So in WebKit
+  only (user agent `AppleWebKit/` without `Chrome/`), `eve.deftype-proto.wasm/slab-capacity` caps a kernel's slabs at
+  64/64/32/32/32/32 MiB plus a 64 MiB coalesce region, about 363 MiB per kernel. The largest growth measured across the
+  browser and perf suites was 32 MiB in class 0. `eve.opfs.mount/make-pool` reserves its share at once, with no probe.
+  An explicit `:capacities` still wins; Chromium and Firefox are unchanged. A rarer WebKit stall remains (see
+  BASELINE §22): a fresh worker that never sends its next file request. WebKit also needs a persistent profile for
+  OPFS (an ephemeral context fails with UnknownError); the runner passes one.
 - **Firefox stalls a new service worker controller's first main-thread synchronous XHR**. Measured in Firefox 159: on a
   page eve-sw.js had just taken control of, the page's first sync XHR, to any URL, waited ~60 s and then failed with
   a NetworkError. Later ones took milliseconds, and so did a worker's. `eve.thread-host` therefore reads the build's

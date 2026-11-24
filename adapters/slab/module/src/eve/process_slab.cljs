@@ -160,7 +160,7 @@
    doubling on out-of-memory up to capacity (grow-sab-slab!), as an mmap-backed
    slab's files do; else it holds capacity from the start."
   [class-idx & {:keys [capacity growable?]}]
-  (let [capacity   (or capacity (d/default-capacity-for-class class-idx))
+  (let [capacity   (or capacity (wasm/slab-capacity class-idx (d/default-capacity-for-class class-idx)))
         block-size (d/slab-size class-idx)
         layout     (d/slab-layout block-size capacity)
         {:keys [total-bytes bitmap-offset bitmap-size desc-offset data-offset total-blocks]} layout
@@ -213,26 +213,26 @@
       (set! initialized? true)
       (let [slab-promises
             (into-array
-              (for [i (range d/NUM_SLAB_CLASSES)]
-                (let [cap (get capacities i (d/default-capacity-for-class i))]
-                  (init-slab! i :capacity cap :growable? growable?))))]
+             (for [i (range d/NUM_SLAB_CLASSES)]
+               (let [cap (get capacities i (wasm/slab-capacity i (d/default-capacity-for-class i)))]
+                 (init-slab! i :capacity cap :growable? growable?))))]
         (init-root-sab!)
         ;; Initialize SAB-backed class 6 coalesc for overflow (>1024 byte) allocations
         (init-sab-coalesc! :growable? growable?)
         ;; Register typed array resolver for deserializer
         (codec/set-typed-array-resolver!
-          (fn [slab-offset]
-            (let [class-idx (decode-class-idx slab-offset)
-                  block-idx (decode-block-idx slab-offset)
-                  inst      (wasm/get-slab-instance class-idx)
-                  sab       (when inst (.-buffer ^js (:u8 inst)))]
-              (when sab
-                (let [block-size (d/slab-size class-idx)
-                      data-off   (aget slab-data-offsets class-idx)
-                      base       (+ data-off (* block-idx block-size))
+         (fn [slab-offset]
+           (let [class-idx (decode-class-idx slab-offset)
+                 block-idx (decode-block-idx slab-offset)
+                 inst      (wasm/get-slab-instance class-idx)
+                 sab       (when inst (.-buffer ^js (:u8 inst)))]
+             (when sab
+               (let [block-size (d/slab-size class-idx)
+                     data-off   (aget slab-data-offsets class-idx)
+                     base       (+ data-off (* block-idx block-size))
                       ;; Apply same 16-byte alignment as typed-array encoder
-                      aligned    (bit-and (+ base 15) (bit-not 15))]
-                  {:sab sab :base aligned})))))
+                     aligned    (bit-and (+ base 15) (bit-not 15))]
+                 {:sab sab :base aligned})))))
         (js/Promise.all slab-promises)))))
 
 (defn- ensure-init!
@@ -1444,7 +1444,7 @@
    (grow-sab-coalesc!); else it is max-data-size from the start (the OS commits
    physical pages on first touch)."
   [& {:keys [max-data-size max-desc growable?]
-       :or   {max-data-size (* 1024 1024 1024) ;; 1GB
+       :or   {max-data-size (wasm/coalesc-capacity (* 1024 1024 1024)) ;; 1GB (WebKit: wasm/coalesc-capacity)
               max-desc      coalesc/MAX_DESCRIPTORS
               growable?     (wasm/grow-slabs?)}}]
   (let [grow?       (and growable? (wasm/growable-sabs?))

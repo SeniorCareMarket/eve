@@ -5,6 +5,7 @@
    (eve.thread-host/share!). The io worker takes the root's Web Lock: this tab owns its files, or follows the tab
    that does and takes over when that tab goes (eve.opfs/owner?, on-role!)."
   (:require
+   [eve.deftype-proto.wasm :as wasm]
    [eve.opfs :as opfs]
    [eve.opfs.follow :as follow]
    [eve.opfs.relay :as relay]
@@ -45,26 +46,34 @@
 (def ^:private min-file-bytes (* 16 1024 1024))
 
 (def ^:private constrained-budget
-  "Where the engine caps growable buffers (WebKit, ~62 GiB a process), the pool reserves at most this: each eve
-   worker's own slabs reserve ~5 GB there (eve.deftype-proto.wasm/create-slab-memory)."
+  "Where the engine caps growable buffers (WebKit, 60 GiB a process: eve.deftype-proto.wasm/webkit?), the pool
+   reserves at most this: each eve worker's own slabs reserve ~363 MiB there (wasm/slab-capacity)."
   (* 4 1024 1024 1024))
 
 (defn- make-pool
   "The pool: the request block, the svc block and the slots. A file's largest size is :max-file-bytes where the
-   engine reserves every slot so; where it does not (WebKit: one budget for every frame and worker of the process),
-   a quarter of the largest size it does reserve, and at most constrained-budget in all, so the pool leaves the rest
-   to the page's workers (.maxFileBytes says what it got; fewer :slots, bigger files)."
+   engine reserves every slot so. On WebKit (one budget for every frame and worker of the process) it is
+   constrained-budget's share of a slot, reserved at once. Elsewhere, where the engine will not reserve them all, it
+   is a quarter of the largest size it does reserve, and at most constrained-budget in all. Either way the pool leaves
+   the rest to the page's workers (.maxFileBytes says what it got; fewer :slots, bigger files)."
   [{:keys [slots max-file-bytes args-words string-bytes]}]
-  (let [[max bufs] (loop [m max-file-bytes]
-                     (if-let [b (slot-buffers slots m)]
-                       (if (or (== m max-file-bytes) (<= (quot m 4) min-file-bytes))
-                         [m b]
-                         (let [q (max min-file-bytes (min (quot m 4) (quot constrained-budget slots)))]
-                           [q (or (slot-buffers slots q) b)]))
-                       (if (> (quot m 2) min-file-bytes)
-                         (recur (quot m 2))
-                         (throw (ex-info "eve.opfs.mount: the engine reserves no pool of these slots"
-                                         {:slots slots :max-file-bytes m})))))]
+  (let [[max bufs] (or
+                    ;; WebKit: its share at once. Probing for it there reserves the process's whole budget in buffers
+                    ;; thrown away (each size tried until one fails), which count until collected: a worker starting
+                    ;; meanwhile could not reserve its slabs (RangeError: Out of memory)
+                    (when (wasm/webkit?)
+                      (let [m (max min-file-bytes (min max-file-bytes (quot constrained-budget slots)))]
+                        (some->> (slot-buffers slots m) (vector m))))
+                    (loop [m max-file-bytes]
+                      (if-let [b (slot-buffers slots m)]
+                        (if (or (== m max-file-bytes) (<= (quot m 4) min-file-bytes))
+                          [m b]
+                          (let [q (max min-file-bytes (min (quot m 4) (quot constrained-budget slots)))]
+                            [q (or (slot-buffers slots q) b)]))
+                        (if (> (quot m 2) min-file-bytes)
+                          (recur (quot m 2))
+                          (throw (ex-info "eve.opfs.mount: the engine reserves no pool of these slots"
+                                          {:slots slots :max-file-bytes m}))))))]
     #js {:ctl (js/SharedArrayBuffer. (+ (* 4 (+ opfs/ARGS args-words)) string-bytes))
          :argsWords args-words
          :svc (js/SharedArrayBuffer. (+ 64 (* 4 args-words)))

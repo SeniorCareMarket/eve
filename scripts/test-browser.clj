@@ -137,8 +137,9 @@
     ;; another engine (firefox, webkit) through Playwright (NODE_PATH, PLAYWRIGHT_BROWSERS_PATH as usual)
     (p/process {:out :string :err :string :dir eve}
                "node" "scripts/browser-open.cjs" engine page-url
-               ;; the OPFS page needs a persistent profile (WebKit has no OPFS in an ephemeral context)
-               (if (or opfs? kept-profile) profile ""))
+               ;; the OPFS page needs a persistent profile (WebKit has no OPFS in an ephemeral context); so does the
+               ;; OPFS perf cell in WebKit (only there: the cell's other engines launch as they did)
+               (if (or opfs? kept-profile (and perf-opfs? (= "webkit" engine))) profile ""))
     (apply p/process {:out :string :err :string}
            (or (find-chrome)
                (throw (ex-info "test:browser: no Chromium found — set EVE_CHROME or run: npx playwright install chromium" {})))
@@ -148,8 +149,9 @@
                    ;; launches. An extension a machine's policy force-installs sees each of the page's and its workers'
                    ;; requests; with one (this fleet's Chrome has two), a worker's run of a few hundred back-to-back
                    ;; synchronous XHRs ends in a NetworkError (the service-worker relay's, or plain network ones alike),
-                   ;; and none fails without it
-                   (when dom? ["--disable-extensions"])
+                   ;; and none fails without it. The OPFS correctness suites too (not the OPFS perf cell): a worker's
+                   ;; importScripts of the kernel failed so there (NetworkError), 2 of ~40 runs, 2026-11-24
+                   (when (or dom? opfs?) ["--disable-extensions"])
                    [(str "--user-data-dir=" profile) page-url]))))
 
 (def timeout-s (parse-long (or (System/getenv "EVE_BROWSER_TIMEOUT_S") "300")))
