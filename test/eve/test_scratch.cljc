@@ -26,7 +26,7 @@
                        (when env (or (.-TMPDIR env) (aget env "TMPDIR")))))
              :cljr (Environment/GetEnvironmentVariable "TMPDIR")
              :lpy (os/environ.get "TMPDIR")
-             :clje (let [x (try (os/getenv "TMPDIR") (catch :default _ nil))]
+             :clje (let [x (try (os/getenv "TMPDIR") (catch _ _ nil))]
                      (when (string? x) x))
              :default (System/getenv "TMPDIR"))]
     (when (and v (string? v) (pos? (count v))) v)))
@@ -108,7 +108,7 @@
       (when (and (pos? (count p)) (not (contains? guarded p)))
         (doseq [c (children-of p)]
           (delete-tree! c))
-        (try (delete-leaf! p) (catch #?(:cljs :default :cljr Exception :lpy python/Exception :default Throwable) _ nil))))))
+        (try (delete-leaf! p) (catch #?(:cljs :default :cljr Exception :lpy python/Exception :clje _ :default Throwable) _ nil))))))
 
 (defn- safe-label
   [label]

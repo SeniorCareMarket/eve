@@ -3,7 +3,8 @@
    (FORMAT-DECISIONS.md §6). Expected values are bits [shift, shift+5) of the
    hash's 32-bit pattern, computed outside Clojure (Python, `(h & 0xFFFFFFFF)
    >> shift & 0x1f`), not by any arm of eve.hamt-util."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
+            [clojure.test :refer [deftest is testing]]
             [eve.hamt-util :as hu]))
 
 ;; [hash shift (mask-hash hash shift)]. 642791526 and -430950298 are the

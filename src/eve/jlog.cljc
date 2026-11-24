@@ -34,6 +34,8 @@
    the prefix is ever erased."
   (:refer-clojure :exclude [aget aset alength byte-array unchecked-byte unsigned-bit-shift-right])
   (:require
+   #?(:clje [eve.host :refer [volatile!]])
+   #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
    [eve.host :refer [aget aset alength byte-array unchecked-byte unsigned-bit-shift-right]]
    [eve.encoding :as enc]
    [eve.int32 :as i32]

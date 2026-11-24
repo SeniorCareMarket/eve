@@ -14,7 +14,8 @@
    host-independent contract of FORMAT-V1 §2–5 — one value packs to the
    same bytes on the JVM and on Node (X1.2)."
   (:refer-clojure :exclude [bytes])
-  (:require [eve.codec :as codec]
+  (:require #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
+            [eve.codec :as codec]
             [eve.encoding :as enc]
             #?(:clj [eve.crypto :as crypto]
                :cljs [eve.crypto :as crypto]
@@ -202,10 +203,12 @@
 
 (def ^:private MAGIC
   "Eve's two magic bytes, EE DB, as a host byte array (made through the
-   writer, so no host spells them)."
-  (let [w (fio/buf 4)]
-    (fio/buf-u8 w 0xEE) (fio/buf-u8 w 0xDB)
-    (fio/chunk-bytes (fio/buf-chunk w 2))))
+   writer, so no host spells them). clojerl compiles a def's value into its module as a literal, which a heap
+   array is not: there it is held as eve.host's const array of the same bytes."
+  (#?(:clje eve.host/const-bytes :default identity)
+   (let [w (fio/buf 4)]
+     (fio/buf-u8 w 0xEE) (fio/buf-u8 w 0xDB)
+     (fio/chunk-bytes (fio/buf-chunk w 2)))))
 
 (defn scalar-body
   "x's Eve bytes without the magic prefix; nil is the single byte 0x00,
@@ -488,7 +491,9 @@
              ;; bare IMeta: cljs.core's on the ClojureScript face;
              ;; under squint the ns refer (eve.core's stub) answers it.
              :cljs (when (satisfies? IMeta v) (meta v))
-             :lpy (when (python/isinstance v basilisp.lang.interfaces/IMeta) (meta v)))]
+             :lpy (when (python/isinstance v basilisp.lang.interfaces/IMeta) (meta v))
+             ;; clojerl: no arm above reads it, and a let binding needs a value
+             :default nil)]
     (if m
       (MetaVal. rep (to-rep m))
       rep)))
@@ -2760,15 +2765,16 @@
 (defn- map-source? [x] (satisfies? IMapSource x))
 ))
 
-#?(:clje (do
-(defprotocol IMapSource
-  (-entries [h] "[[key value] ...] with values as scalars or handles")
-  (-lookup [h k nf])
-  (-mcount [h])
-  (-assoc-entry [h k v])
-  (-dissoc-entry [h k]))
-(defn- map-source? [x] (satisfies? IMapSource x))
-))
+;; clojerl: each form its own top-level conditional (a defprotocol inside a do fails there: "Could not
+;; dereference ... There is no Erlang function to back it up", eve.host's IHostArray note)
+#?(:clje
+   (defprotocol IMapSource
+     (-entries [h] "[[key value] ...] with values as scalars or handles")
+     (-lookup [h k nf])
+     (-mcount [h])
+     (-assoc-entry [h k v])
+     (-dissoc-entry [h k])))
+#?(:clje (defn- map-source? [x] (satisfies? IMapSource x)))
 
 ;; basilisp reads no :clj arm, so the block above never defines
 ;; IMapSource there; the :lpy section's map handles implement it.

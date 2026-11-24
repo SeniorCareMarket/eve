@@ -24,7 +24,8 @@
    Direct region access to an encrypted domain (alloc/-sio-mem-region: eve.array's element views, a typed array's
    block) would read ciphertext, and is refused."
   (:refer-clojure :exclude [aget aset alength unchecked-byte load bytes])
-  (:require [eve.host :refer [aget aset alength unchecked-byte bytes]]
+  (:require #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
+            [eve.host :refer [aget aset alength unchecked-byte bytes]]
             [eve.encoding :as enc]
             [eve.mem :as mem]
             [eve.region :as region]

@@ -176,15 +176,15 @@
         (str "[" (clojure.string/join " " parts) "]")))))
 
 (extend-protocol clojerl.IStringable
-  ByteArray        (toString [a] (array-str a))
-  ShortArray       (toString [a] (array-str a))
-  IntArray         (toString [a] (array-str a))
-  LongArray        (toString [a] (array-str a))
-  FloatArray       (toString [a] (array-str a))
-  DoubleArray      (toString [a] (array-str a))
-  ObjectArray      (toString [a] (array-str a))
-  ConstByteArray   (toString [a] (array-str a))
-  ConstObjectArray (toString [a] (array-str a)))
+  ByteArray        (str [a] (array-str a))
+  ShortArray       (str [a] (array-str a))
+  IntArray         (str [a] (array-str a))
+  LongArray        (str [a] (array-str a))
+  FloatArray       (str [a] (array-str a))
+  DoubleArray      (str [a] (array-str a))
+  ObjectArray      (str [a] (array-str a))
+  ConstByteArray   (str [a] (array-str a))
+  ConstObjectArray (str [a] (array-str a)))
 
 (defn- filled
   "An array of ctor's kind: n zeroed elements, or the elements of a seq."

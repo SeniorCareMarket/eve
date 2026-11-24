@@ -12,6 +12,7 @@
    eve.jlog-test holds them to java.util.zip.CRC32's goldens."
   (:refer-clojure :exclude [aget unsigned-bit-shift-right])
   (:require
+   #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
    [eve.host :refer [aget unsigned-bit-shift-right]]
    [eve.int32 :as i32]
    #?(:jolt [jolt.scheme :as scheme])))

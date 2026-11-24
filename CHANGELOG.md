@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Fixed (clojerl): compile errors show, and eve.atom loads through eve.jlog.** eve.host's IStringable extension
+  for its arrays spelled the method `toString`; clojerl's protocol method is `str`, so stringifying a host array threw
+  `:undef clojerl.IStringable__eve.host.ByteArray/str.1`, including inside clojerl's error formatting, which hid the
+  real compile error. Clojerl analyzes a `^tag` symbol as a form in the namespace that uses it (an argument's tag where
+  it is declared, a callee's return tag at every call site), so `^long`/`^bytes` need eve.host's names in scope there:
+  eve.crc32, eve.keyring, eve.jlog, eve.flat.chunk and eve.hamt-util-test take them under `:clje` (the pattern
+  eve.list and eve.tally already use), and eve.jlog takes eve.host's `volatile!`. eve.flat.chunk: `MAGIC` is a const
+  array on clje (a def's value compiles into its module as a literal), `to-rep`'s metadata binding has a `:default`
+  arm, and the `:clje` IMapSource forms are top-level (a defprotocol inside a do fails on clojerl). The next clje wall
+  is eve.flat.chunk's handle types: `defseqhandle` (chunk.cljc:3504) has no clojerl section yet.
+
 - **Fixed (clojerl): `eve.crypto` resolves once.** clojerl refuses a namespace found twice on its code path, and the
   `:clje` roots held both `adapters/crypto/beam/src/eve/crypto.clje` and the portable `eve/crypto.cljc`
   (`Found more than one eve/crypto`), so nothing requiring `eve.crypto` loaded on clje (eve.keyring, eve.db.ds).
