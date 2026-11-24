@@ -72,6 +72,13 @@
 ;; Typed array tag — stores a JS typed array as a flat byte blob.
 ;; Format: [0xEE][0xDB][0x1B][subtype:u8][byte-length:u32][raw bytes...] = 8 + N bytes
 (def ^:const FAST_TAG_TYPED_ARRAY 0x1B)
+;; Bytes tag — a run of bytes: the one binary scalar (doc/flat/FORMAT-V1.md §3's
+;; bytes node, with the magic in front). The same bytes in a slab block, an
+;; atom's value, a map key, the digest's input, a flat chunk (less the magic) and
+;; a file: a binary value moves between them by copy, never by re-encoding.
+;; Format: [0xEE][0xDB][0x28][len: unsigned LEB128 varint][raw bytes...]
+;; 0x1B subtype 1 (Uint8Array) written before this tag still reads, as bytes.
+(def ^:const FAST_TAG_BYTES 0x28)
 
 ;; EveArray tag — SAB pointer to a live eve-array (zero-copy wrapper).
 ;; Format: [0xEE][0xDB][0x1C][block-offset:i32] = 7 bytes.

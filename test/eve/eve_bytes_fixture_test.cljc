@@ -43,6 +43,8 @@
 
 (def fixture-path "test/eve/fixtures/eve-bytes.edn")
 
+(declare hex->bytes)
+
 (defn- read-fixtures []
   #?(:lpy
      ;; basilisp 0.5.1's readers: basilisp.edn splits 1e300 into 1 and e300,
@@ -56,6 +58,8 @@
                       ;; exclude it), so the tag is dropped in the text read
                       ;; here and the payload stands as a one-character string
                       (str/replace "#char " "")
+                      ;; #eve/bytes rows name the bytes scalar (0x28); not basilisp's (:hosts)
+                      (str/replace "#eve/bytes " "")
                       (str/replace #":value (-?\d+)e(\d+)"
                                    ;; basilisp hands the function the matched text
                                    (fn [s] (let [[_ m e] (re-matches #":value (-?\d+)e(\d+)" s)]
@@ -94,7 +98,8 @@
                                   (str/includes? line ":note \"flat vec with nil and scalars")
                                   (str/includes? line ":note \"vector key, flat on every host")
                                   (str/includes? line ":note \"set key")
-                                  (str/includes? line ":note \"map key"))
+                                  (str/includes? line ":note \"map key")
+                                  (str/includes? line ":note \"bytes"))
                       (num/read-edn line
                                     {:readers {'uuid uuid 'inst (fn [s] (js/Date. s)) 'char codec/eve-char}}))))
                 (str/split-lines (.readFileSync (js/require "fs") fixture-path "utf8"))))
@@ -103,10 +108,10 @@
       ;; clojure.edn reads #uuid and #inst itself (the JVM's UUID and Date, the
       ;; CLR's Guid and DateTime). #char is eve's own reader on both hosts: a
       ;; Character here, the codec's EveChar on ClojureScript (§4).
-      #?(:cljs {:readers {'uuid uuid 'inst (fn [s] (js/Date. s)) 'char codec/eve-char}}
+      #?(:cljs {:readers {'uuid uuid 'inst (fn [s] (js/Date. s)) 'char codec/eve-char 'eve/bytes #(hex->bytes %)}}
          ;; (first s): the host's own character — .charAt is the JVM's, and ClojureCLR's String has none
          ;; (System.MissingMethodException: both fixture tests errored there)
-         :default {:readers {'char (fn [s] (first s))}})
+         :default {:readers {'char (fn [s] (first s)) 'eve/bytes #(hex->bytes %)}})
       #?(:cljs (.readFileSync (js/require "fs") fixture-path "utf8")
          :default (slurp fixture-path)))))
 
@@ -136,6 +141,9 @@
   "Equality that holds a date by its time and NaN to itself."
   [a b]
   (cond
+    ;; a run of bytes (the bytes scalar): equal by its bytes
+    #?(:cljs (instance? js/Uint8Array a) :clj (bytes? a) :default false)
+    (= (bytes->hex a) (bytes->hex b))
     (inst? a) (and (inst? b) (= #?(:squint (.getTime a) :default (inst-ms a))
                                 #?(:squint (.getTime b) :default (inst-ms b))))
     :else (= a b)))
