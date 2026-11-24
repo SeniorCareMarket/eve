@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Changed (every host): the jlog is a redo log — one device flush per commit.** A commit no longer forces the slab
+  classes it touched before its CAS (11 msyncs per commit measured on jolt); its record carries the delta and the
+  bytes of its new blocks, it waits on the log's prefix watermark (one msync, shared by concurrent commits), and it
+  lets its old root go only once the record is durable. Recovery replays the prefix over the newest anchor and pins
+  the rows it touched (a leak, never a use-after-free). Commits that cannot carry their redo (past one slot, the
+  coalesced class, an in-place deftype write) force before their CAS and log the delta only. v1 logs are moved to v2
+  on the first open no other process holds (renamed `<base>.jlog.v1`); `:jlog-version 1` keeps v1.
+  `doc/jlog-redo-spec.md`. **Fixed (Node):** the module slab's whole-domain force skipped the descriptor flags and
+  pointer columns.
+
 - **Changed (every host): the commit journal is `<base>.jlog`, one cljc implementation (`eve.jlog`).** A fixed-size
   ring of 4 KiB record slots in a file mapped like the root, claimed by CAS on mapped words — no OS file lock. It
   replaces the eleven per-host `eve.journal-file` adapters, whose locks did not exclude each other across hosts (a

@@ -1,6 +1,7 @@
 # The redo commit log (jlog v2): one device flush per commit
 
-Status: SPEC, 2026-11-23 ET. Follows the jlog of `eve-mmap-journal-plan.md` (eve.db.ds), which this changes where
+Status: IMPLEMENTED 2026-11-24 ET (`eve.jlog` v2, `eve.atom` jlog2-*; §10 lists where the code differs from the
+spec text). Written 2026-11-23 ET. Follows the jlog of `eve-mmap-journal-plan.md` (eve.db.ds), which this changes where
 noted. Asked for by John: "do both option 1 and 2 … I don't like the idea of only some hosts getting some semantics.
 But I'd like them all to go at 0.4 ms or better."
 
@@ -122,3 +123,38 @@ filesystem (ext4, xfs: checked by `fstatfs`), files with no holes (checked with 
 once when they grow). Elsewhere — other filesystems, macOS, a file with holes — the per-file msync, which is the same
 guarantee, slower. Bindings: jolt's FFI, the Node addon, bb's FFI, the JVM's FFM (`--enable-preview` on JDK 21, final
 from 22).
+
+## 10. As implemented (where the code differs from §1–§9)
+
+- **W5 takes the fallback.** A record carries no byte ranges of shared blocks. The `set!`/`cas!` rewriters (JVM,
+  generic ISlabIO, ClojureScript) emit `eve.deftype-proto.alloc/note-write!` before an in-place field write; a commit
+  attempt binds `alloc/*inplace*` and, when it wrote into a block it did not allocate, forces its touched classes before
+  its CAS and writes a NOREDO record. Rare (a mutable deftype field written inside a swap), so the fast path stays one
+  flush.
+- **Record layout.** `[EVR3][seq][kind][label][nonce][writer][len][0]` (32 bytes), body, CRC-32. COMMIT body: the delta
+  `[slot old new hash]`, `n-blocks × [off flags pointer len bytes]` (W1–W3; W2 is the offset), `n-pins × [off flags]`
+  (W4). NOREDO: the delta alone. ANCHOR: the 2048-byte table.
+- **Atom-slot claims are records.** A claim (pointer := CLAIMED, the name hash) writes a delta-only NOREDO record and
+  waits for it, so recovery keeps the slot claimed before the registry names it.
+- **The gate.** A commit may reserve up to half the ring past the newest durable anchor; at that mark it runs a
+  checkpoint (§5), whose own reservation may use the other half. Several processes may checkpoint at once: each folds
+  from the newest anchor, `H_ANCHOR` advances by CAS-max.
+- **Recovery voids the stale tail.** After installing, every valid record whose seq is at or past the end of the prefix
+  (written, never acknowledged) has its magic zeroed and its slot forced before anything new is written at that seq;
+  otherwise a later recovery could read it as the new prefix's continuation. Then the reservation state is rebuilt
+  and a fresh ANCHOR written.
+- **A live-looking domain is joined, not recovered** (as on v1): after `kill -9` the page cache is intact, and a dead
+  writer's hole is voided by the first waiter once its heartbeat is stale (30 s). A power-loss image read before its
+  heartbeats age is the same case.
+- **Slab growth forces sizes.** A v2 commit forces no slab file, so a grown class's five files have their sizes forced
+  (an msync of each file's first bytes) when they are re-mapped, before a block past the old end is handed out — JVM,
+  jolt, bb (`alloc/remap-jvm!`, the refresh path) and Node (`remap-mmap-slab!`). Replay sets bitmap bits with
+  `alloc/mark-allocated!` (a Node host op too).
+- **Node's whole-domain force covers the flags and pointer columns** (it forced data, bitmap and count only: H3 on the
+  module slab).
+- **Batch (J10) on v2.** Records are written per commit; a commit waits on the watermark only at its batch boundary
+  (count or window), and the old roots of the commits before it are let go then.
+- **A zombie** (its reservation voided while alive) runs a checkpoint before it returns: the forced domain and the new
+  ANCHOR cover its commit.
+- **v1 logs** are recovered by their own rule and moved to v2 on the open that recovers them (`<base>.jlog` renamed
+  `<base>.jlog.v1`, never deleted), unless that open asks for `:jlog-version 1`.

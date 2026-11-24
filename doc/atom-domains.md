@@ -40,7 +40,7 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
 
 ```text
 (persistent-atom-domain base-path & {:keys [capacities lustre? durable? journal-batch
-                                             journal-window-ms jlog-slots jlog-stripes
+                                             journal-window-ms jlog-slots jlog-stripes jlog-version
                                              coalesc-descriptors mem-budget segment-bytes]})
 ```
 
@@ -50,7 +50,8 @@ on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they 
   forces, `sync!` is the caller's explicit barrier.
 - The disk tier is journaled whenever it is durable (see *Journal durability*, below): `:journal-batch` (default 1:
   every commit durable when `swap!` returns) and `:journal-window-ms` batch the journal's forces; `:jlog-slots` (a power
-  of two, default 1024) and `:jlog-stripes` (default 1) size the log when the domain is created.
+  of two, default 1024) sizes the log when the domain is created; `:jlog-version 1` asks for the v1 log
+  (`:jlog-stripes`, default 1, sizes its stripes).
 - `:mem-budget` — bytes: caps the domain's total region growth (see *Tiers and the memory budget*).
 - `:segment-bytes` — a power of two (default 256 MiB): the region mapping window (see *Segmentation*).
 - Which process **creates** a domain is decided by one atomic exclusive create of `<base>.root`
@@ -94,21 +95,31 @@ A disk domain carries `<base>.jlog` (the disk tier is journaled by design): the 
 (`src/eve/jlog.cljc`), one implementation on every host. It is a fixed-size file mapped like the root (the same
 `region/open-mmap-region`, the same native binding per host) — a header page, a reservation state per slot, and a
 ring of 4 KiB record slots — and it is coordinated only by CAS on mapped words, as the atom table is: no file lock.
-A commit forces the blocks it wrote BEFORE its root CAS (no pointer is visible before the blocks it reaches are
-durable), CASes the root and bumps the epoch, then reserves a slot (CAS on the stripe's tail, once the slot's previous
-lap is done: a slow writer back-pressures, it is never overwritten), writes a record — the epoch label and the whole
-atom table read after it, CRC-32 checked — and forces the slot's page: that force is the commit point, and no lock is
-held across it, so concurrent writers' forces overlap.
+It is a **redo log** (version 2, `doc/jlog-redo-spec.md`): a commit forces no slab file. It reserves its log seq
+after reading the old root and before its CAS (so log order extends happens-before), CASes the root and bumps the
+epoch, writes one record — the delta (atom slot, old and new root) and the redo of what it wrote: its new blocks'
+bytes, their bitmap bits, flags and pointer columns, and the rows its holds touched, CRC-32 checked — then waits
+until the log's prefix watermark passes it. The watermark's msync is the commit point and the commit's one device
+flush; concurrent commits share it (group commit). Only then is the old root let go, so no block a durable state
+reaches is ever freed. A commit whose redo would not fit one 4 KiB slot, that allocates in the coalesced class, or
+that wrote in place into a block it did not allocate (an eve-deftype field inside the swap) forces its blocks before
+its CAS instead and writes a delta-only record.
 
-Recovery (an open no live process holds) takes the root's hold word as its recovery hold, scans every slot, and
-installs the valid record with the highest epoch label — never the last in file order, never erasing a record — when
-its label or table differs from the root's; it repairs a leaked in-flight count, rebuilds the reservation state and
-appends an anchor record. A checkpoint (`sync!`, close) forces the whole domain and appends an anchor; nothing is
-truncated. A domain written by a pre-jlog build (`<base>.journal`, EVJ1) is migrated by the first open no other
-process holds: its newest record (by epoch, a legacy record never older than the root) is installed, and the file
-is renamed `<base>.journal.migrated`. The design and its proofs: eve.db.ds `doc/perf/eve-mmap-journal-plan.md`.
+Recovery (an open no live process holds) takes the root's hold word as its recovery hold, reads the newest anchor
+record and the consecutive valid records after it (the prefix: a missing or torn record ends it — no commit after
+it was acknowledged), folds their deltas over the anchor's table, replays their redo, pins every row a replayed
+record names (count := held for ever: a count may err high, a leak, never low), forces the domain, installs the
+table, voids the records past the prefix and appends a fresh anchor. A waiter that finds a dead writer's unwritten
+slot at the watermark forces the whole domain and writes a VOID there. A checkpoint (`sync!`, close, half the ring
+past the newest anchor) waits for the watermark, forces the whole domain and appends an anchor folded from the
+ring; nothing is truncated. A version-1 log (each commit forced before its CAS, records the whole table; the plan's
+design, `:jlog-version 1`) is recovered by its own rule (the highest epoch label) and moved to v2, the old file
+renamed `<base>.jlog.v1`. A domain written by a pre-jlog build (`<base>.journal`, EVJ1) is migrated by the first open
+no other process holds: its newest record (by epoch, a legacy record never older than the root) is installed, and
+the file is renamed `<base>.journal.migrated`. The designs and their proofs: `doc/jlog-redo-spec.md` (v2) and eve.db.ds `doc/perf/eve-mmap-journal-plan.md` (v1).
 
-The domain keeps a **retention floor**: the epoch the journal pins against reclamation. It is set at the open (the
+A domain on a v1 log keeps a **retention floor** (a v2 log needs none: an old root is let go only after the
+commit that replaced it is durable): the epoch the journal pins against reclamation. It is set at the open (the
 highest valid label, or the recovered one) and advanced by **flush-advance**: each flush records the label of the
 record it appended, and the next flush moves the floor to it. Blocks a still-recoverable epoch needs are therefore
 never reclaimed out from under the journal.
