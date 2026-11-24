@@ -60,6 +60,7 @@
    [eve.deftype.type-id-test :as type-id-test]
    [eve.typed-array-test :as typed-array-test]
    [eve.mem-test :as mem-test]
+   [eve.region-opfs-test]
    [eve.region :as region]
    [eve.mem :as mem]
    [eve.mmap-test :as mmap-test]
@@ -219,6 +220,9 @@
 
 (defn- run-mem! []
   (t/run-tests 'eve.mem-test))
+
+(defn- run-opfs-region! []
+  (t/run-tests 'eve.region-opfs-test))
 
 (defn- load-native-addon! []
   (let [path (.resolve (js/require "path") "build/Release/mmap_cas.node")]
@@ -413,6 +417,7 @@
    "validation"  run-validation!
    "typed-array" run-typed-array!
    "mem"         run-mem!
+   "opfs-region" run-opfs-region!
    "mmap"        run-mmap!
    "mmap-slab"   run-mmap-slab!
    "mmap-atom"     run-mmap-atom!
