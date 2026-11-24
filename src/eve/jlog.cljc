@@ -802,7 +802,9 @@
 (defn split-body
   "BODY in CNT parts of at most R3_MAX_BODY bytes each, in order (the last ones empty when it is shorter)."
   [^bytes body cnt]
-  (let [n (alength body)]
+  (let [n (alength body)
+        _ (when (> n (* cnt R3_MAX_BODY))
+            (throw (ex-info "eve.jlog: a record body past its reserved run" {:len n :parts cnt})))]
     (mapv (fn [i]
             (let [from (min n (* i R3_MAX_BODY))
                   to (min n (* (inc i) R3_MAX_BODY))

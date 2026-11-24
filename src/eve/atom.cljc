@@ -943,41 +943,40 @@
      ok?)))
 
 (defn- jlog2-redo
-  "A won commit's redo: [blocks pins]. blocks: each block the attempt allocated (ALLOCS, its log) that a holder took
-   (PUB: the new root reaches it; what none took free-unreached! freed) with its bytes, flags and pointer column
-   (W1-W3). pins: every other block whose row the attempt's holds touched (TOUCHES, W4)."
-  [sio allocs touches]
-  (let [blocks (into []
-                     (keep (fn [off]
-                             (when-let [row (alloc/desc-row sio off)]
-                               (let [f (slab/region-load-i32 (nth row 2) (nth row 3))]
-                                 (when-not (zero? (bit-and f tally/F_PUB))
-                                   {:off off
-                                    :flags f
-                                    :pointer (slab/region-load-i32 (nth row 4) (nth row 5))
-                                    :bytes (slab/read-bytes sio off 0 (d/slab-size (alloc/decode-class-idx off)))})))))
-                     allocs)
-        mine (into #{} (map u32) allocs)
-        pins (into []
-                   (keep (fn [off] (when (and (not (contains? mine (u32 off))) (alloc/desc-row sio off))
-                                     {:off off :flags 0})))
-                   (distinct (map u32 touches)))]
-    [blocks pins]))
+  "A won commit's redo from its plan (jlog2-plan): [blocks pins] — each of KEPT (the blocks the attempt allocated that
+   a holder took) with its bytes, flags and pointer column (W1-W3); each of PINS (the other rows its holds touched,
+   W4)."
+  [sio kept pins]
+  [(mapv (fn [off]
+           (let [row (alloc/desc-row sio off)]
+             {:off off
+              :flags (slab/region-load-i32 (nth row 2) (nth row 3))
+              :pointer (slab/region-load-i32 (nth row 4) (nth row 5))
+              :bytes (slab/read-bytes sio off 0 (d/slab-size (alloc/decode-class-idx off)))}))
+         kept)
+   (mapv (fn [off] {:off off :flags 0}) pins)])
 
 (defn- jlog2-plan
-  "How a commit is logged, decided before its CAS: the slots its redo takes (its body, bounded above by every
-   allocation of the attempt), or :fallback — the forced fallback (NOREDO): an allocation in the coalesced class, a
-   block written in place that the attempt did not allocate (WRITES), or a redo past a quarter of the ring."
-  [log allocs touches writes]
+  "How a commit is logged, decided before its CAS (after hold-root!): {:cnt :kept :pins} — KEPT the blocks the attempt
+   allocated that a holder took (PUB: the new root reaches them; the rest free-unreached! frees after the CAS), PINS
+   the other rows its holds touched, CNT the slots their redo takes, exactly — or :fallback, the forced fallback
+   (NOREDO): an allocation in the coalesced class, a block written in place that the attempt did not allocate
+   (WRITES), or a redo past a quarter of the ring."
+  [sio log allocs touches writes]
   (let [mine (into #{} (map u32) allocs)]
     (if (or (some (fn [off] (== alloc/OVERFLOW_CLASS_IDX (alloc/decode-class-idx off))) allocs)
             (some (fn [off] (not (contains? mine (u32 off)))) writes))
       :fallback
-      (let [body (+ 24
-                    (reduce + 0 (map (fn [off] (+ 16 (d/slab-size (alloc/decode-class-idx off)))) allocs))
-                    (* 8 (count (remove (fn [off] (contains? mine (u32 off))) (distinct (map u32 touches))))))
-            cnt (quot (+ body (dec jlog/R3_MAX_BODY)) jlog/R3_MAX_BODY)]
-        (if (> cnt (quot (:n log) 4)) :fallback cnt)))))
+      (let [kept (filterv (fn [off]
+                            (when-let [row (alloc/desc-row sio off)]
+                              (not (zero? (bit-and (slab/region-load-i32 (nth row 2) (nth row 3)) tally/F_PUB)))))
+                          allocs)
+            pins (filterv (fn [off] (and (not (contains? mine off)) (alloc/desc-row sio off)))
+                          (distinct (map u32 touches)))
+            body (+ 24 (reduce + 0 (map (fn [off] (+ 16 (d/slab-size (alloc/decode-class-idx off)))) kept))
+                    (* 8 (count pins)))
+            cnt (max 1 (quot (+ body (dec jlog/R3_MAX_BODY)) jlog/R3_MAX_BODY))]
+        (if (> cnt (quot (:n log) 4)) :fallback {:cnt cnt :kept kept :pins pins})))))
 
 (defn- jlog2-drop-pending!
   "Let go the old roots a batch's commits deferred (their records are durable now)."
@@ -991,13 +990,13 @@
    the redo, or NOREDO for a FALLBACK? commit (forced before its CAS) — wait until the watermark passes it (a batch
    commit only at its boundary), then let OLD-PTR go. A record a resolver voided (a zombie) is replaced by a
    checkpoint, whose forced domain and ANCHOR cover the commit."
-  [ds seq cnt label slot old-ptr new-ptr allocs touches fallback?]
+  [ds seq cnt label slot old-ptr new-ptr plan fallback?]
   (let [{:keys [root-r sio journal]} ds
         delta {:slot slot :old old-ptr :new new-ptr
                :hash (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_HASH_OFFSET))}
         body (if fallback?
                (jlog/encode-commit-body delta nil nil)
-               (let [[blocks pins] (jlog2-redo sio allocs touches)]
+               (let [[blocks pins] (jlog2-redo sio (:kept plan) (:pins plan))]
                  (jlog/encode-commit-body delta blocks pins)))
         written? (jlog2-write! ds seq (if fallback? jlog/K_NOREDO jlog/K_COMMIT) label body cnt)
         last-seq (i32/i32 (+ seq (dec cnt)))
@@ -1992,9 +1991,9 @@
                 ;; fallback, and — after any fallback force, before its CAS — its log seq (jlog2-commit!)
                 v2? (jlog2? ds)
                 allocs (when v2? (alloc/logged-allocs lsio))
-                plan (when v2? (jlog2-plan (:log journal) allocs @tally/*touches* @alloc/*inplace*))
+                plan (when v2? (jlog2-plan sio (:log journal) allocs @tally/*touches* @alloc/*inplace*))
                 fallback? (= :fallback plan)
-                jcnt (if (number? plan) plan 1)
+                jcnt (if (map? plan) (:cnt plan) 1)
                 _ (when fallback?
                     (alloc/sync-touched! sio (-> @tally/*touches* (into (take-unforced! ds)) (into allocs)
                                                  (into @alloc/*inplace*))))
@@ -2027,7 +2026,7 @@
                 (tally/free-unreached! sio (alloc/logged-allocs lsio))
                 (cond
                   v2?
-                  (do (jlog2-commit! ds jseq jcnt label atom-slot-idx old-ptr new-ptr allocs @tally/*touches* fallback?)
+                  (do (jlog2-commit! ds jseq jcnt label atom-slot-idx old-ptr new-ptr plan fallback?)
                       (when (:unforced ds)
                         (swap! (:unforced ds) into (map (fn [o] [(alloc/decode-class-idx o) o])) @tally/*touches*)))
 
