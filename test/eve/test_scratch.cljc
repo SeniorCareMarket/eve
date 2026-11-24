@@ -123,7 +123,8 @@
 (def ^:private allocated (atom #{}))
 
 (defn unique-dir
-  "Create and return <tmpdir>/eve-<label>-<uniq> (no trailing slash)."
+  "Create and return <tmpdir>/eve-<label>-<uniq> (no trailing slash).
+   Call from a test or a :once fixture, never at namespace load."
   [label]
   (let [d (str (tmpdir) "/" (unique-name label))]
     (proc/ensure-parent-dir! (str d "/.keep"))
@@ -151,7 +152,10 @@
 
 (defn window-dir
   "A unique directory under /dev/shm when that filesystem is present,
-   otherwise unique-dir. For tests that place a domain in the window."
+   otherwise unique-dir. For tests that place a domain in the window.
+   Call from a test or a :once fixture, never at namespace load: a
+   compiler or require would leave the directory with no fixture to
+   delete it."
   [label]
   (if (dir-exists? "/dev/shm")
     (let [d (str "/dev/shm/" (unique-name label))]
@@ -207,3 +211,25 @@
   [root]
   (fn [f]
     (try (f) (finally (delete-tree! root)))))
+
+(defn- delete-allocated!
+  "Delete every unique tree this process still holds. Best-effort."
+  []
+  (doseq [d @allocated]
+    (delete-tree! d))
+  (reset! allocated #{}))
+
+;; A require or compile can evaluate a test ns without running its
+;; :once fixture. Remove whatever is still registered when the process exits.
+;; JVM (shadow-cljs compiles .cljc test nses on the compiler JVM) and Node.
+#?(:cljs (when (exists? js/process)
+           (.on js/process "exit" (fn [_] (delete-allocated!))))
+   :cljr nil
+   :jolt nil
+   :lpy nil
+   :clje nil
+   :jank nil
+   :default (try
+              (.addShutdownHook (Runtime/getRuntime)
+                                (Thread. ^Runnable delete-allocated!))
+              (catch Throwable _ nil)))
