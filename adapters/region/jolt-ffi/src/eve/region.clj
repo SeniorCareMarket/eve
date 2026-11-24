@@ -12,15 +12,16 @@
                             locking transient persistent! conj! assoc! bytes objects
                             const-bytes const-objects])
   (:require
+   [eve.fsync :as fsync]
    [eve.host :refer [aget aset alength byte-array int-array long-array object-array
                      into-array unchecked-byte unchecked-int unchecked-long
                      unchecked-inc-int unsigned-bit-shift-right long double class locking
                      transient persistent! conj! assoc! bytes objects const-bytes
                      const-objects]]
    [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
-                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
-                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
-                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]]
+                            -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                            -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                            -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]]
    [clojure.string :as str]
    [jolt.ffi :as ffi]
    [jolt.scheme :as scheme]))
@@ -609,3 +610,42 @@
                                          (.-base ^JoltRegion region)
                                          bm-byte-offset bit-idx)
                           (bm-free region bm-byte-offset bit-idx)))))))
+
+;; ---------------------------------------------------------------------------
+;; eve.fsync's file syscalls (option 1, doc/jlog-redo-spec.md §9) through jolt.ffi — Linux only (struct stat's st_ino
+;; at 8 and st_size at 48, statfs's f_type at 0: x86-64 and aarch64 alike); elsewhere nil, and eve.fsync's callers
+;; force region by region.
+;; ---------------------------------------------------------------------------
+
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-fstat "fstat" [:int :pointer] :int {:capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-lseek "lseek" [:int :int64 :int] :int64 {:capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-fstatfs "fstatfs" [:int :pointer] :int {:capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-sync-file-range "sync_file_range" [:int :int64 :int64 :uint32] :int
+  {:blocking true :capture-native-error true})
+#_{:clj-kondo/ignore [:unresolved-symbol]}
+(ffi/defcfn jolt-fdatasync "fdatasync" [:int] :int {:blocking true :capture-native-error true})
+
+(defn- file-call! [what [r e]]
+  (when (neg? r) (throw (ex-info (str "eve.region: " what " failed: errno " e) {:errno e})))
+  r)
+
+(defn- with-buf [n f]
+  (let [b (ffi/alloc n)]
+    (try (f b) (finally (ffi/free b)))))
+
+(def ^:private jolt-file-syscalls
+  (when (= :linux os)
+    {:open-ro (fn [path] (first (jolt-open (.getAbsolutePath (java.io.File. ^String path)) 0 0)))
+     :fstat (fn [fd] (with-buf 144 (fn [b] (file-call! "fstat" (jolt-fstat fd b))
+                                     [(ffi/read (+ b 8) :int64) (ffi/read (+ b 48) :int64)])))
+     :seek-hole (fn [fd] (file-call! "lseek SEEK_HOLE" (jolt-lseek fd 0 4)))
+     :fs-type (fn [fd] (with-buf 128 (fn [b] (file-call! "fstatfs" (jolt-fstatfs fd b)) (ffi/read b :int64))))
+     :sync-range (fn [fd] (file-call! "sync_file_range" (jolt-sync-file-range fd 0 0 7)) nil)
+     :fdatasync (fn [fd] (file-call! "fdatasync" (jolt-fdatasync fd)) nil)
+     :close (fn [fd] (jolt-close fd) nil)}))
+
+(fsync/register! (fn [] jolt-file-syscalls))

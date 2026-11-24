@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Changed (Linux: JVM, jolt, babashka, Node): a whole-domain force is one device flush.** Checkpoints, close,
+  `sync!`, recovery, a dead writer's resolution and a fallback commit's class force write the slab files back with
+  `sync_file_range` and make them durable with one `fdatasync` (`eve.fsync`), for every file that is hole-free on ext4
+  or xfs and unchanged in inode and size since this process last fdatasync'd it; other files are forced one by one. A
+  new domain's slab files are written in full at creation, so they start hole-free (a domain's first checkpoint: 31
+  flushes; every later one: 1). Non-Linux hosts and Lustre domains force region by region as before. The Node addon
+  gains seven file functions (rebuild it).
+
 - **Changed (every host): the jlog is a redo log — one device flush per commit.** A commit no longer forces the slab
   classes it touched before its CAS (11 msyncs per commit measured on jolt); its record carries the delta and the
   bytes of its new blocks, it waits on the log's prefix watermark (one msync, shared by concurrent commits), and it

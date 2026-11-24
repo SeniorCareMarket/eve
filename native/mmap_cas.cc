@@ -47,6 +47,9 @@
 #include <fcntl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#ifdef __linux__
+#include <sys/vfs.h>
+#endif
 #include <unistd.h>
 
 #ifdef __linux__
@@ -762,6 +765,79 @@ static Napi::Value Msync(const Napi::CallbackInfo& info)
     return env.Undefined();
 }
 
+// ---------------------------------------------------------------------------
+// eve.fsync's file syscalls (option 1, doc/jlog-redo-spec.md §9): a set of a
+// domain's files forced with one device flush where that is safe. Linux only:
+// elsewhere the functions are not exported and eve.fsync's callers force
+// region by region.
+// ---------------------------------------------------------------------------
+#ifdef __linux__
+static int FdArg(const Napi::CallbackInfo& info)
+{
+    return static_cast<int>(info[0].As<Napi::Number>().Int32Value());
+}
+
+static void ThrowErrno(Napi::Env env, const char* what)
+{
+    Napi::Error::New(env, std::string(what) + " failed: " + std::strerror(errno)).ThrowAsJavaScriptException();
+}
+
+static Napi::Value FileOpenRO(const Napi::CallbackInfo& info)
+{
+    auto path = info[0].As<Napi::String>().Utf8Value();
+    return Napi::Number::New(info.Env(), ::open(path.c_str(), O_RDONLY | O_CLOEXEC));
+}
+
+static Napi::Value FileStat(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    struct stat st;
+    if (::fstat(FdArg(info), &st) != 0) { ThrowErrno(env, "fstat"); return env.Undefined(); }
+    auto out = Napi::Array::New(env, 2);
+    out.Set(0u, Napi::Number::New(env, static_cast<double>(st.st_ino)));
+    out.Set(1u, Napi::Number::New(env, static_cast<double>(st.st_size)));
+    return out;
+}
+
+static Napi::Value FileSeekHole(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    off_t r = ::lseek(FdArg(info), 0, SEEK_HOLE);
+    if (r < 0) { ThrowErrno(env, "lseek SEEK_HOLE"); return env.Undefined(); }
+    return Napi::Number::New(env, static_cast<double>(r));
+}
+
+static Napi::Value FileFsType(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    struct statfs s;
+    if (::fstatfs(FdArg(info), &s) != 0) { ThrowErrno(env, "fstatfs"); return env.Undefined(); }
+    return Napi::Number::New(env, static_cast<double>(s.f_type));
+}
+
+static Napi::Value FileSyncRange(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    if (::sync_file_range(FdArg(info), 0, 0,
+                          SYNC_FILE_RANGE_WAIT_BEFORE | SYNC_FILE_RANGE_WRITE | SYNC_FILE_RANGE_WAIT_AFTER) != 0)
+        ThrowErrno(env, "sync_file_range");
+    return env.Undefined();
+}
+
+static Napi::Value FileDatasync(const Napi::CallbackInfo& info)
+{
+    auto env = info.Env();
+    if (::fdatasync(FdArg(info)) != 0) ThrowErrno(env, "fdatasync");
+    return env.Undefined();
+}
+
+static Napi::Value FileClose(const Napi::CallbackInfo& info)
+{
+    ::close(FdArg(info));
+    return info.Env().Undefined();
+}
+#endif
+
 static Napi::Object Init(Napi::Env env, Napi::Object exports)
 {
     // Existing hardware-atomic ops
@@ -779,6 +855,16 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports)
     exports["wait32"]   = Napi::Function::New(env, Wait32,   "wait32");
     exports["notify32"] = Napi::Function::New(env, Notify32, "notify32");
     exports["msync"]    = Napi::Function::New(env, Msync,    "msync");
+#ifdef __linux__
+    // eve.fsync's file syscalls (option 1)
+    exports["fileOpenRO"]    = Napi::Function::New(env, FileOpenRO,    "fileOpenRO");
+    exports["fileStat"]      = Napi::Function::New(env, FileStat,      "fileStat");
+    exports["fileSeekHole"]  = Napi::Function::New(env, FileSeekHole,  "fileSeekHole");
+    exports["fileFsType"]    = Napi::Function::New(env, FileFsType,    "fileFsType");
+    exports["fileSyncRange"] = Napi::Function::New(env, FileSyncRange, "fileSyncRange");
+    exports["fileDatasync"]  = Napi::Function::New(env, FileDatasync,  "fileDatasync");
+    exports["fileClose"]     = Napi::Function::New(env, FileClose,     "fileClose");
+#endif
 
     // Lustre fcntl-based ops
     exports["openWithFd"]     = Napi::Function::New(env, OpenWithFd,     "openWithFd");

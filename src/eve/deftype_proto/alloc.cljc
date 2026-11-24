@@ -39,6 +39,7 @@
                      unsigned-bit-shift-right long double locking bytes shorts ints floats
                      doubles objects defdelay field]]
    [eve.slab-io :as slab]
+   [eve.fsync :as fsync]
    [eve.deftype-proto.coalesc :as coalesc]
    [eve.deftype-proto.data :as d]
    [eve.deftype-proto.serialize :as ser]
@@ -65,6 +66,17 @@
   [& regions]
   (doseq [r regions]
     (when r (mem/sync-region! r 0 64))))
+
+(defn- fill-zero!
+  "Write zeros over the first N bytes of a new file's region R, so the file has no hole: eve.fsync forces a set of
+   files with one flush only when each is hole-free. Run by a domain's creator, before any other process can open the
+   domain (a hole filled later could race another process allocating there)."
+  [r n]
+  (loop [off 0]
+    (when (< off n)
+      (let [k (min 65536 (- n off))]
+        (mem/-write-bytes! r off (byte-array k))
+        (recur (+ off k))))))
 
 (def ^:const CLASS_BITS 3)
 (def ^:const BLOCK_IDX_BITS 29)
@@ -1346,6 +1358,22 @@
                                (aset regions OVERFLOW_CLASS_IDX new-r)
                                (slab/regions-changed! ctx)))))))))))))))
 
+     (defn- ctx-file-paths
+       "The files of ctx's slab classes CLASSES — each bitmap class's data, bitmap and three descriptor-column files,
+        the coalesced class's one file — for eve.fsync; nil for a heap ctx or a Lustre domain (forced region by
+        region: a Lustre mount is neither ext4 nor xfs)."
+       [^JvmSlabCtx ctx classes]
+       (let [^objects fps (field ctx file-paths)
+             ^objects bps (field ctx bitmap-paths)]
+         (when (and fps (some? (aget fps 0)) (not (region/lustre-region? (aget ^objects (field ctx regions) 0))))
+           (into []
+                 (mapcat (fn [ci]
+                           (when-let [p (when (< ci (alength fps)) (aget fps ci))]
+                             (if (< ci OVERFLOW_CLASS_IDX)
+                               [p (aget bps ci) (str p ".desc-count") (str p ".desc-flags") (str p ".desc-pointer")]
+                               [p]))))
+                 classes))))
+
      (defn sync-jvm-slab-regions!
        "Force every region the JVM slab ctx holds — the slab data regions,
         the allocator bitmap regions and the three descriptor-column regions
@@ -1358,13 +1386,16 @@
         domain force left them in the page cache while sync-jvm-touched-
         classes! forced them.)"
        [sio]
-       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
-         (doseq [^objects arr [(field ctx regions) (field ctx bitmap-regions) (field ctx desc-regions)
-                               (field ctx desc-flags-regions) (field ctx desc-pointer-regions)]
-                 :when arr
-                 r arr
-                 :when r]
-           (mem/sync-region! r))))
+       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)
+             paths (ctx-file-paths ctx (range (alength ^objects (field ctx regions))))]
+         ;; option 1 (eve.fsync): the files written back and made durable with one flush where that is safe
+         (when-not (and (seq paths) (fsync/sync-files! paths))
+           (doseq [^objects arr [(field ctx regions) (field ctx bitmap-regions) (field ctx desc-regions)
+                                 (field ctx desc-flags-regions) (field ctx desc-pointer-regions)]
+                   :when arr
+                   r arr
+                   :when r]
+             (mem/sync-region! r)))))
 
      (defn sync-jvm-touched-classes!
        "Force, per slab class in classes, that class's data region, bitmap
@@ -1374,14 +1405,16 @@
         the flags/pointer column regions are their own files and ARE
         forced here; the whole-slab form never forced them.)"
        [sio classes]
-       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)]
+       (let [^JvmSlabCtx ctx (slab/domain-ctx sio)
+             paths (ctx-file-paths ctx classes)]
+         (when-not (and (seq paths) (fsync/sync-files! paths))
          (doseq [ci classes
                  ^objects arr [(field ctx regions) (field ctx bitmap-regions)
                                (field ctx desc-regions) (field ctx desc-flags-regions)
                                (field ctx desc-pointer-regions)]
                  :when (and arr (< ci (alength arr)))]
            (when-let [r (aget arr ci)]
-             (mem/sync-region! r)))))
+             (mem/sync-region! r))))))
 
      ;; -----------------------------------------------------------------------
      ;; Heap-Backed Slab Lifecycle  (JVM only)
@@ -2188,6 +2221,12 @@
                            desc-count-region (region/open-mmap-region (str (nth slab-paths i) ".desc-count") (:desc-column-bytes layout) opts)
                            desc-flags-region (region/open-mmap-region (str (nth slab-paths i) ".desc-flags") (:desc-column-bytes layout) opts)
                            desc-pointer-region (region/open-mmap-region (str (nth slab-paths i) ".desc-pointer") (:desc-column-bytes layout) opts)]
+                       ;; every page written once, so the new files have no hole (eve.fsync: one flush for many files)
+                       (when-not lustre?
+                         (fill-zero! region (:data-bytes layout))
+                         (fill-zero! bm-region (:bitmap-bytes layout))
+                         (doseq [r [desc-count-region desc-flags-region desc-pointer-region]]
+                           (fill-zero! r (:desc-column-bytes layout))))
                        (mem/-store-i32! region d/SLAB_HDR_MAGIC d/SLAB_MAGIC)
                        (mem/-store-i32! region d/SLAB_HDR_BLOCK_SIZE block-size)
                        (mem/-store-i32! region d/SLAB_HDR_TOTAL_BLOCKS init-blocks)
@@ -2219,6 +2258,7 @@
            (if create?
              (let [layout (coalesc/coalesc-layout coalesc/INITIAL_DATA_SIZE coalesc-descriptors)
                    r      (region/open-mmap-region coalesc-path (:total-bytes layout) opts)]
+               (when-not lustre? (fill-zero! r (:total-bytes layout)))
                (coalesc/init-coalesc-region! r coalesc/INITIAL_DATA_SIZE coalesc-descriptors)
                r)
              (let [peek     (region/open-mmap-region coalesc-path 64 opts)

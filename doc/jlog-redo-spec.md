@@ -116,13 +116,35 @@ crash leaves pinned rows only for blocks the window touched. Per host before/aft
 
 ## 9. Option 1's place
 
-With redo, slab files are forced only at a checkpoint, by a dead-writer resolver and at recovery — whole-domain
+Status: implemented (§9.1). With redo, slab files are forced only at a checkpoint, by a dead-writer resolver and at recovery — whole-domain
 forces, off the commit path. There the single-flush barrier (write back every dirty range with `sync_file_range`,
 then one `fdatasync`) replaces ~10–40 per-file flushes with one, where it is safe: Linux, an update-in-place
 filesystem (ext4, xfs: checked by `fstatfs`), files with no holes (checked with `SEEK_HOLE`; new slab files written
 once when they grow). Elsewhere — other filesystems, macOS, a file with holes — the per-file msync, which is the same
 guarantee, slower. Bindings: jolt's FFI, the Node addon, bb's FFI, the JVM's FFM (`--enable-preview` on JDK 21, final
 from 22).
+
+### 9.1 As implemented (`eve.fsync`)
+
+`eve.fsync/sync-files!` forces a set of a domain's slab files: each trusted file is written back with
+`sync_file_range(WAIT_BEFORE | WRITE | WAIT_AFTER)` and ONE `fdatasync` makes them all durable (ext4, journaled or
+not, and xfs end every fdatasync with a device cache flush); every other file gets its own fdatasync. A file is
+trusted when it is on ext4 or xfs, has no hole (`lseek SEEK_HOLE` answers its size), and its inode and size are the
+ones this process saw hole-free when it last fdatasync'd it — so no write since then can have allocated a block (the
+metadata a write-back does not make durable). The rule is written once, in cljc; each host registers its system
+calls from its region namespace (`eve.fsync/register!`): jolt through `jolt.ffi`, babashka through `babashka.ffi`, the
+JVM through `java.lang.foreign` (by reflection; JDK 21 runs it without `--enable-preview`, measured on 21.0.13 — no
+JVM flag changed), Node through seven new functions of the addon (`native/mmap_cas.cc`, Linux builds). A host that
+registers nothing (not Linux, a static bb, no addon, a JDK without the API) forces region by region, as before.
+
+A new domain's slab files are written in full by their creator before any other process can open the domain
+(`fill-zero!`, JVM/jolt/bb and Node), so they start hole-free. A class that grows gets holes in its new half: filling
+them then would race other processes allocating there (closing that race needs a header word, a format change), so a
+grown class's files are forced one by one until their pages have all been written once; a domain made before this
+change likewise. Lustre domains are forced region by region.
+
+Measured (this box; jolt, babashka and the JVM alike): a new domain's first checkpoint forces its 31 slab files one by
+one (31 flushes); every later checkpoint, and recovery in the same process, is one flush.
 
 ## 10. As implemented (where the code differs from §1–§9)
 
