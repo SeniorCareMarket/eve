@@ -43,7 +43,7 @@
 (defn- post! [result]
   (js/fetch "/result" #js {:method "POST" :body (pr-str result)}))
 
-(defn- start! [rows t0]
+(defn- start! [rows t0 mode]
   (let [[w] (h/start-threads! 1 'eve.runner.opfs-browser-main/run-suite {:reply (h/self)} {})
         timer (atom nil)]
     (reset! timer
@@ -53,7 +53,7 @@
                  (cond
                    (and (map? m) (= :suite (:op m)))
                    (do (js/clearInterval @timer)
-                       (post! (assoc m :main rows :ms (- (js/Date.now) t0) :driving (h/driving))))
+                       (post! (assoc m :main rows :ms (- (js/Date.now) t0) :driving (h/driving) :opfs-mode mode)))
                    (and (map? m) (= w (:eve.thread/exit m)))
                    (do (js/clearInterval @timer)
                        (post! {:op :died :notice m :main rows})))))
@@ -64,5 +64,5 @@
     (let [rows (main-rows)
           t0 (js/Date.now)]
       (-> (opfs/mount! {:root "eve-opfs-test"})
-          (.then (fn [_] (start! (assoc rows :mounted true) t0))
+          (.then (fn [p] (start! (assoc rows :mounted (some? p)) t0 (.-mode p)))
                  (fn [e] (post! {:op :mount-failed :message (str e) :main (assoc rows :mounted false)})))))))

@@ -35,6 +35,7 @@
 
 (deftest synced-bytes-are-the-files
   (is (some? (opfs/pool-of)) "the worker's start carried the pool")
+  (is (contains? #{"readwrite-unsafe" "readwrite"} (opfs/handle-mode)) "the mode the io worker probed")
   (let [r (opfs/open-region (p "a.bin") 10000)]
     (is (= 10000 (mem/-byte-length r)))
     (mem/-store-i32! r 0 11)

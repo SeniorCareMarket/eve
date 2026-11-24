@@ -14,7 +14,7 @@ const LOCK = 0, DOORBELL = 1, DONE = 2, OP = 3, STATUS = 4, R0 = 5, R1 = 6, NARG
 const OPEN = 1, PERSIST = 2, EXISTS = 3, SIZE = 4, CREATE_EXCL = 5, RENAME = 6, DELETE = 7, CLOSE_ALL = 8,
       MKDIRS = 9;
 const PAGE = 4096, BOUNCE = 1 << 20;
-let ctl, ctlBytes, argsCap, strBase, slots, dirty, root, nextSlot = 0;
+let ctl, ctlBytes, argsCap, strBase, slots, dirty, root, nextSlot = 0, handleOpts;
 const byPath = new Map();       // path -> {slot, handle}
 const bySlot = [];              // slot -> {path, handle}
 const bounce = new Uint8Array(BOUNCE);
@@ -59,7 +59,7 @@ async function open(path, size) {
   if (!e) {
     if (nextSlot >= slots.length) throw new Error('eve.opfs: the pool has no free slot (' + slots.length + ' files)');
     const fh = await fileHandle(path, true);
-    const handle = await fh.createSyncAccessHandle();
+    const handle = await fh.createSyncAccessHandle(handleOpts);
     const slot = nextSlot++;
     e = {slot, handle, path};
     byPath.set(path, e); bySlot[slot] = e;
@@ -132,6 +132,24 @@ async function rename(from, to) {
   }
 }
 
+// readwrite-unsafe (Chromium 121+): handles that do not lock the file, so a tab taking a domain over (W7) opens its
+// files while a hung owner still holds its handles -- the Web Lock, not the handle, keeps one writer. Probed: two
+// handles on one file in that mode both open. Elsewhere the mode is unknown (Firefox ignores it and the second open
+// fails) and every handle is the exclusive default.
+async function probeUnsafe() {
+  const name = '.eve-mode-probe';
+  let h1 = null, h2 = null, ok = false;
+  try {
+    const fh = await root.getFileHandle(name, {create: true});
+    h1 = await fh.createSyncAccessHandle({mode: 'readwrite-unsafe'});
+    h2 = await fh.createSyncAccessHandle({mode: 'readwrite-unsafe'});
+    ok = true;
+  } catch (_) { ok = false; }
+  for (const h of [h1, h2]) { try { if (h) h.close(); } catch (_) {} }
+  try { await root.removeEntry(name); } catch (_) {}
+  return ok;
+}
+
 function closeAll() {
   for (const e of byPath.values()) { e.handle.flush(); e.handle.close(); }
   byPath.clear();
@@ -190,7 +208,9 @@ self.onmessage = async (ev) => {
     slots = d.slots; dirty = d.dirty;
     root = await navigator.storage.getDirectory();
     for (const p of String(d.root).split('/').filter(Boolean)) root = await root.getDirectoryHandle(p, {create: true});
-    self.postMessage({eveOpfsReady: true, unsafe: false});
+    const unsafe = await probeUnsafe();
+    handleOpts = unsafe ? {mode: 'readwrite-unsafe'} : undefined;
+    self.postMessage({eveOpfsReady: true, mode: unsafe ? 'readwrite-unsafe' : 'readwrite'});
   } catch (err) {
     self.postMessage({eveOpfsReady: false, error: String(err && err.stack || err)});
     return;

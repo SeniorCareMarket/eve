@@ -76,6 +76,7 @@
               (fn [e]
                 (let [d (.-data e)]
                   (when (.-eveOpfsReady d)
+                    (set! (.-mode p) (.-mode d))
                     (.revokeObjectURL js/URL url)
                     (reset! pool p)
                     (h/share! "eve.opfs" p)
@@ -94,6 +95,13 @@
 
 (defn- the-pool []
   (or (pool-of) (throw (ex-info "eve.opfs: no OPFS pool here (the page mounts it before its threads start)" {}))))
+
+(defn handle-mode
+  "The io worker's sync access handle mode: \"readwrite-unsafe\" where the
+   browser has it (Chromium 121+: handles do not lock their file), else
+   \"readwrite\" (exclusive); nil with no pool."
+  []
+  (some-> (pool-of) .-mode))
 
 (def ^:private encoder (js/TextEncoder.))
 (def ^:private decoder (js/TextDecoder.))
