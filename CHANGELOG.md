@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Added (clojerl): EveBigInt, so 123N stays distinct from 123.** Clojerl integers are already unbounded, but the
+  typetag and print must stay distinct (`pr-number` / `host-pr-number` spell `123N` or `#eve/N "123"`), as basilisp's
+  wrapper does; `(= 5 5N)` holds through equiv. `as-double` unwraps before `float`, else `mod'` `:badarg`. Other hosts'
+  read forms are unchanged. `bb test:clje eve.numeric-test`: 6/84/0/0 (was 6/75/9/0).
+
+- **Fixed (clojerl): ISeqable `to_list` walks first/next, not `into []` via nth.** `clj_murmur3/ordered` (and
+  `hash-ordered-coll`) calls `to_list`. The generated `to_list` did `(into [] this)`, and `into` reduces a counted
+  vector through `ci-reduce` / `nth`: hash of a 310k RRB vector was 31 s versus 0.7 s for a first/next walk (same hash
+  2880101559). A seq's seq is itself, so `to_list` cannot recurse through `seq`. `eve.rrb-vector-test` is 22/68/0/0
+  under a 400 s cap (test-splicing 77 s, was 128 s). `types.clje` is clje-only.
+
+- **Fixed (clojerl): an RRB Transient's self `conj!` dispatches `-conj!`.** `eve.rrb-vector.rrbt` referred
+  `eve.host`'s `conj!` (which is `conj`) and called it on the transient itself; the `:clje` refer now takes
+  `eve.core`'s `conj!`. `test-assoc!` passes. Other hosts unchanged.
+
 - **Fixed (glojure): the Go crypto adapter actually loads, and edwards rows are native.** glojure's `RT.Load` walked
   the whole load path and kept the last matching file, so `adapters/crypto/portable/src/eve/crypto.cljc` overwrote
   `adapters/crypto/go/src/eve/crypto.glj` (`host.X25519` was ~0.1 ms; `eve.crypto/x25519` was the portable 2.3 s row).
@@ -25,8 +40,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   eve.flat.transfer takes its fallback path, eve.array reaches the chunk statically, and the redundant declares are
   left out. eve.types maps `(clojure.lang.MapEntry. k v)` and binds a type's fields for its lifted print fn
   (eve.numeric's EveRatio); eve.host has `double?`. Every other host reads each changed file to the same forms as before.
-  `bb test:clje` (one process per namespace): 18 namespaces green (was 6) and 30 of the 32 load and run; eve.overflow-test
-  (`unimplemented intern`, as before) and eve.rrb-vector-test (`:badarg`) still stop at load.
+  `bb test:clje` (one process per namespace): 19 namespaces green (was 6; numeric-test now 6/84/0/0) and 31 of the 32
+  load and run; eve.overflow-test still stops at `unimplemented intern`. eve.rrb-vector-test is 22/68/0/0 under a 400 s
+  cap (the 180 s cap killed clojerl's Atom server mid-run and reported `:badarg`).
 
 - **Fixed (clojerl): compile errors show, and eve.atom loads through eve.jlog.** eve.host's IStringable extension
   for its arrays spelled the method `toString`; clojerl's protocol method is `str`, so stringifying a host array threw
