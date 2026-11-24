@@ -146,8 +146,17 @@
 ;; Protocols: a method fn of fixed arities, caching its impl by class
 ;; ---------------------------------------------------------------------------
 
+;; glojure's own instance?, captured before the bridge at the bottom of
+;; this file re-roots the var. answers?, host-ref?, the deref wrapper,
+;; and deftype-instance? are on that bridge's path: the miss arm of
+;; instance? derefs a protocol atom (@p), and clojure.core/deref then
+;; called instance? on IRecord / IDeref — a cycle (measured:
+;; eve.type-io-test, stack overflow in HasType / Class.accepts,
+;; 2026-11-24 ET).
+(def ^:private raw-instance? @#'clojure.core/instance?)
+
 (defn- answers? [atype x]
-  (if (nil? atype) (nil? x) (and (some? x) (instance? atype x))))
+  (if (nil? atype) (nil? x) (and (some? x) (raw-instance? atype x))))
 
 (defn impl-for
   "The fn protocol p's method k is for x: the impl extended to x's own type, else to nil (x nil), else to a type x is
@@ -231,11 +240,11 @@
 (defn- host-ref?
   "x is one of glojure's own (its atom, delay, var, volatile, promise, future ...): a Go value that is no record."
   [x]
-  (not (instance? clojure.lang.IRecord x)))
+  (not (raw-instance? clojure.lang.IRecord x)))
 
 (alter-var-root #'clojure.core/deref
   (fn [core]
-    (fn ([x] (if (and (host-ref? x) (instance? clojure.lang.IDeref x)) (core x) (-deref x)))
+    (fn ([x] (if (and (host-ref? x) (raw-instance? clojure.lang.IDeref x)) (core x) (-deref x)))
       ([x ms timeout-val]
        (if (host-ref? x) (core x ms timeout-val) (-deref-within x ms timeout-val))))))
 
@@ -345,11 +354,8 @@
    do for a deftype (below)."
   (atom #{}))
 
-(def ^:private raw-instance?
-  "glojure's own instance?, captured before the bridge below re-roots the var: deftype-instance?
-   is called BY that bridge, so it must not go through it (the cycle overflowed the stack at
-   load, measured)."
-  @#'clojure.core/instance?)
+;; raw-instance? is captured above, before answers? and host-ref?, and
+;; is still the original here: the instance? re-root is below.
 
 (defn deftype-instance?
   "x is an instance of a type deftype or reify made."
@@ -372,18 +378,23 @@
   [m]
   (vreset! coll-dispatch m))
 
-(defn- real-impl?
+(defn real-impl?
   "True when protocol p serves x through an impl extended to x's own type
    or to a supertype of it — not through the protocol's Object arm.
    eve.core's protocols extend Object arms that delegate back to
    clojure.core's own fns (ICounted's arm calls clojure.core/count,
-   IAssociative's clojure.core/assoc, ISeqable's clojure.core/seq), so a
+   IAssociative's clojure.core/assoc, ISeqable's clojure.core/seq,
+   IMeta's clojure.core/meta, IWithMeta's clojure.core/with-meta), so a
    satisfies? that counts the arm makes EVERY type satisfy the protocol,
    and routing through the arm re-enters the very fn that asked, without
    bound (measured: eve.core/count of a persistent-sorted-set Iter —
    which has no -count of its own — recursed count -> -count -> count
    until the runtime stack overflowed; the same shape waited in assoc,
-   get and seq for any type lacking that kind's impl). impl-for's own
+   get and seq for any type lacking that kind's impl, and in
+   MapRecord.Meta — eveglj/types, a map-mode deftype — which forwards
+   to eve.core/-meta, whose Object arm calls clojure.core/meta, which
+   calls .Meta again: pr-str of eve.type-io-test/TaggedMap overflowed
+   in instance?/HasType/Class.accepts, 2026-11-24 ET). impl-for's own
    resolution, minus its Object fallback, is the test."
   [p x]
   (when p
@@ -635,13 +646,21 @@
        (catch Throwable _ nil)))
 
 (defn- route-transient
-  "core wrapped so a deftype instance satisfying eve.core's protocol proto is answered by its
-   method m; any other value by core."
+  "core wrapped so a deftype instance with a real (non-Object) impl of
+   eve.core's protocol proto is answered by its method m; any other value
+   by core. satisfies? is the wrong test: eve.core extends those
+   protocols to Object with arms that call clojure.core's own transient
+   fns, so every type satisfies them, and the arm re-enters this wrapper
+   without bound (measured: eve.core/into of an EveList —
+   eve.reclaim-test/a-list-walk-aligns-the-chains — overflowed through
+   -as-transient / clojure.core/transient / route-transient, with
+   eve-proto's (require eve.core) on the repeating frames, 2026-11-24 ET).
+   real-impl? is the same type-check count already uses."
   [core proto m]
   (fn [& xs]
     (let [x (first xs)]
       (if (and (deftype-instance? x)
-               (when-let [p (eve-proto proto)] (satisfies? p x))
+               (when-let [p (eve-proto proto)] (real-impl? p x))
                (eve-method m))
         (apply @(eve-method m) xs)
         (apply core xs)))))

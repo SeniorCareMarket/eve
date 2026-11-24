@@ -208,7 +208,27 @@
 ;; a map type's map methods (eve's Go types package, impls/glojure/types): eve.core's, which reach the type's own
 (defn- print-map [m] (pr-str (into {} (eve.core/seq m))))
 
+(defn- map-meta
+  "Meta of a map-mode type. MapRecord.Meta forwards here, and IMeta's
+   Object arm is clojure.core/meta, which calls .Meta again — a cycle
+   (measured: pr-str of eve.type-io-test/TaggedMap, whose print-method
+   dispatch does (meta x), overflowed in instance?/HasType/Class.accepts,
+   2026-11-24 ET). Only a real IMeta impl is called, the same type-check
+   real-impl? uses for count/assoc/get/seq."
+  [m]
+  (when (eve.host-completion/real-impl? eve.core/IMeta m)
+    (eve.core/-meta m)))
+
+(defn- map-with-meta
+  "with-meta of a map-mode type: only a real IWithMeta impl, else the
+   value (IWithMeta's Object arm is clojure.core/with-meta, the same
+   MapRecord.WithMeta re-entry as map-meta)."
+  [m meta]
+  (if (eve.host-completion/real-impl? eve.core/IWithMeta m)
+    (eve.core/-with-meta m meta)
+    m))
+
 (eveglj:types.SetMethods
  {:count eve.core/-count :lookup eve.core/-lookup :assoc eve.core/-assoc :dissoc eve.core/-dissoc :seq eve.core/seq
-  :equiv eve.core/-equiv :hash eve.core/-hash :conj eve.core/-conj :empty eve.core/-empty :meta eve.core/-meta
-  :with-meta eve.core/-with-meta :invoke eve.core/-invoke :str print-map})
+  :equiv eve.core/-equiv :hash eve.core/-hash :conj eve.core/-conj :empty eve.core/-empty :meta map-meta
+  :with-meta map-with-meta :invoke eve.core/-invoke :str print-map})

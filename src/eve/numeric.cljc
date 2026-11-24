@@ -295,6 +295,15 @@
                          (throw (ex-info "ratio has no integer value" {:value x}))
                          (number? x) (BigInteger/valueOf #?(:clje x :default (long x)))
                          :else (BigInteger. (str x)))
+                  :glj (cond
+                         (instance? clojure.lang.BigInt x)
+                         (.toBigInteger ^clojure.lang.BigInt x)
+                         (instance? java.math.BigInteger x) x
+                         (instance? java.math.BigDecimal x)
+                         (.toBigInteger x)
+                         (instance? clojure.lang.Ratio x)
+                         (throw (ex-info "ratio has no integer value" {:value x}))
+                         :else (java.math.BigInteger. (str x)))
                   :cljr (cond
                           (instance? clojure.lang.BigInt x)
                           (.toBigInteger ^clojure.lang.BigInt x)
@@ -326,11 +335,11 @@
      ;; basilisp's unprimed + - * are checked long ops (an exact token
      ;; past a long threw ArithmeticException: integer overflow); its
      ;; primed ops promote, exactly as on :clj.
-     (defn- bi-abs [a] (if (neg? a) #?(:clj (-' a) :lpy (-' a) :jank (-' a) :cljr (-' a) :default (- a)) a))
-     (defn- bi-neg [a] #?(:clj (-' a) :lpy (-' a) :jank (-' a) :cljr (-' a) :default (- a)))
-     (defn- bi+ [a b] #?(:clj (+' a b) :lpy (+' a b) :jank (+' a b) :cljr (+' a b) :default (+ a b)))
-     (defn- bi- [a b] #?(:clj (-' a b) :lpy (-' a b) :jank (-' a b) :cljr (-' a b) :default (- a b)))
-     (defn- bi* [a b] #?(:clj (*' a b) :lpy (*' a b) :jank (*' a b) :cljr (*' a b) :default (* a b)))
+     (defn- bi-abs [a] (if (neg? a) #?(:clj (-' a) :glj (-' a) :lpy (-' a) :jank (-' a) :cljr (-' a) :default (- a)) a))
+     (defn- bi-neg [a] #?(:clj (-' a) :glj (-' a) :lpy (-' a) :jank (-' a) :cljr (-' a) :default (- a)))
+     (defn- bi+ [a b] #?(:clj (+' a b) :glj (+' a b) :lpy (+' a b) :jank (+' a b) :cljr (+' a b) :default (+ a b)))
+     (defn- bi- [a b] #?(:clj (-' a b) :glj (-' a b) :lpy (-' a b) :jank (-' a b) :cljr (-' a b) :default (- a b)))
+     (defn- bi* [a b] #?(:clj (*' a b) :glj (*' a b) :lpy (*' a b) :jank (*' a b) :cljr (*' a b) :default (* a b)))
      ;; basilisp's quot/rem are long ops: an unscaled value past a long
      ;; threw ArithmeticException: integer overflow (numeric-tags
      ;; decimals-round-trip). Python's floordiv/mod floor; Clojure's
@@ -362,6 +371,7 @@
      (defn- bi-pow10 [k]
        #?(:jank (loop [i 0 p (bi-from 1)] (if (< i k) (recur (inc i) (bi* p (bi-from 10))) p))
           :clj (.pow (BigInteger/TEN) (int k))
+          :glj (loop [i 0 p (bi-from 1)] (if (< i k) (recur (inc i) (bi* p (bi-from 10))) p))
           :lpy (python/pow 10 k)
           :cljr (loop [i 0 p (bi-from 1)] (if (< i k) (recur (inc i) (bi* p (bi-from 10))) p))
           :default (loop [i 0 p 1] (if (< i k) (recur (inc i) (#?(:clj *' :default *) p 10)) p))))
@@ -446,6 +456,7 @@
 
 (defn- host-ratio? [v]
   #?(:clj (instance? clojure.lang.Ratio v)
+     :glj (instance? clojure.lang.Ratio v)
      :cljr (instance? clojure.lang.Ratio v)
      :lpy (instance? fractions/Fraction v)
      ;; jank's (type x) is the completion's type-key string
@@ -454,12 +465,15 @@
 
 (defn- host-decimal? [v]
   #?(:clj (instance? java.math.BigDecimal v)
+     :glj (instance? java.math.BigDecimal v)
      :cljr (instance? clojure.lang.BigDecimal v)
      :lpy (instance? decimal/Decimal v)
      :default false))
 
 (defn- host-bigint? [v]
   #?(:clj (or (instance? clojure.lang.BigInt v)
+              (instance? java.math.BigInteger v))
+     :glj (or (instance? clojure.lang.BigInt v)
               (instance? java.math.BigInteger v))
      :cljr (or (instance? clojure.lang.BigInt v)
                (instance? clojure.lang.BigInteger v))
@@ -626,6 +640,7 @@
        (toString [_] (decimal-layout unscaled scale))))
    :cljs nil
    :clj nil
+   :glj nil
    :lpy nil
    :cljr nil
    :default
@@ -719,6 +734,9 @@
                                (or (.-bipart ^clojure.lang.BigInt x)
                                    (BigInteger/valueOf (.-lpart ^clojure.lang.BigInt x)))
                                x)
+                        :glj (if (instance? clojure.lang.BigInt x)
+                               (.toBigInteger ^clojure.lang.BigInt x)
+                               x)
                         :cljr (if (instance? clojure.lang.BigInt x)
                                 (.toBigInteger ^clojure.lang.BigInt x)
                                 x)
@@ -788,6 +806,7 @@
 (defn- wrap-bigint [n]
   #?(:cljs (EveBigInt. (if (bi? n) n (bi-from n)))
      :clj (clojure.core/bigint n)
+     :glj (clojure.core/bigint n)
      :cljr (clojure.core/bigint n)
      :jank (clojure.core/bigint n)
      :lpy (if (instance? EveBigInt n) n (EveBigInt. (bi-from n)))
@@ -801,6 +820,7 @@
   [x]
   (cond
     (bigint? x) #?(:clj (clojure.core/bigint x)
+                   :glj (clojure.core/bigint x)
                    :cljr (clojure.core/bigint x)
                    :cljs (if (eve-bigint-type? x) x (EveBigInt. (unwrap-bi x)))
                    :default x)
@@ -814,6 +834,13 @@
                                     (throw (ex-info "Nonintegral decimal has no bigint value" {:value x}))))
                                 (bi* u (bi-pow10 (- s))))))
                     :clj (.toBigIntegerExact ^java.math.BigDecimal x)
+                    :glj (let [s (scale x) u (unwrap-bi (unscaled-value x))]
+                           (if (zero? s) u
+                             (if (pos? s)
+                               (let [q (bi-quot u (bi-pow10 s)) r (bi-rem u (bi-pow10 s))]
+                                 (if (bi-zero? r) q
+                                   (throw (ex-info "Nonintegral decimal has no bigint value" {:value x}))))
+                               (bi* u (bi-pow10 (- s))))))
                     :cljs (let [u (.-unscaled x) s (.-scale x)]
                             (if (zero? s) u
                               (if (pos? s)
@@ -855,13 +882,14 @@
     (if (bi= d (bi-from 1))
       (wrap-bigint n)
       #?(:clj (/ (clojure.core/bigint n) (clojure.core/bigint d))
+         :glj (/ (clojure.core/bigint n) (clojure.core/bigint d))
          :lpy (fractions/Fraction n d)
          :cljs (EveRatio. n d)
          :clje (EveRatio. n d)
-         ;; ClojureCLR, like the JVM, has host ratios: this namespace
-         ;; defines no EveRatio deftype for it (the deftype blocks above
-         ;; are only for hosts whose number tower lacks the type), so
-         ;; cljr takes the :clj arm's host construction.
+         ;; ClojureCLR and glojure, like the JVM, have host ratios: this
+         ;; namespace defines no EveRatio deftype for them (the deftype
+         ;; blocks above are only for hosts whose number tower lacks the
+         ;; type), so cljr and :glj take the :clj arm's host construction.
          :cljr (/ (clojure.core/bigint n) (clojure.core/bigint d))
          :default (EveRatio. n d)))))
 
@@ -908,6 +936,15 @@
        (instance? clojure.lang.BigInt x) (.toBigInteger ^clojure.lang.BigInt x)
        (instance? java.math.BigDecimal x) (.toBigIntegerExact ^java.math.BigDecimal x)
        (number? x) (java.math.BigInteger/valueOf #?(:clje x :default (long x)))
+       :else (java.math.BigInteger. (str x))))
+   :glj
+   (defn- bi->biginteger
+     "unscaled as a host integer. glojure's BigInteger is a *big.Int:
+      the string ctor works; BigInteger/valueOf does not (EvalASTMaybeHostForm)."
+     [x]
+     (cond
+       (instance? java.math.BigInteger x) x
+       (instance? clojure.lang.BigInt x) (.toBigInteger ^clojure.lang.BigInt x)
        :else (java.math.BigInteger. (str x)))))
 
 (defn- make-bigdec [unscaled scale]
@@ -916,6 +953,7 @@
   ;; normalizes a negative scale away (1E+2 came back as 100).
   #?(:jank (EveBigDec. unscaled (int scale))
      :clj (java.math.BigDecimal. (bi->biginteger unscaled) (int scale))
+     :glj (clojure.core/bigdec (str unscaled "E" (- scale)))
      :lpy (decimal/Decimal (str unscaled "E" (- scale)))
      :cljs (EveBigDec. (bi-from unscaled) (int scale))
      :clje (EveBigDec. unscaled (int scale))
@@ -930,6 +968,7 @@
   [x]
   (cond
     (host-ratio? x) #?(:clj (clojure.core/numerator x)
+                       :glj (clojure.core/numerator x)
                        :cljr (clojure.core/numerator x)
                        :jank (clojure.core/numerator x)
                        :lpy (.-numerator x)
@@ -946,6 +985,7 @@
   [x]
   (cond
     (host-ratio? x) #?(:clj (clojure.core/denominator x)
+                       :glj (clojure.core/denominator x)
                        :cljr (clojure.core/denominator x)
                        :jank (clojure.core/denominator x)
                        :lpy (.-denominator x)
@@ -958,6 +998,8 @@
                      :default "denominator requires a ratio or integer")
                   #?(:default {:value x} :cljs nil)))))
 
+#?(:glj (declare glj-decimal-unscaled-scale))
+
 (defn scale
   "The scale of a decimal (digits to the right of the decimal point; may be
    negative, as in 1E+2M). Not the canonical/wire scale."
@@ -965,6 +1007,7 @@
   (cond
     (host-decimal? x) #?(:jank 0
                          :clj (.scale ^java.math.BigDecimal x)
+                         :glj (second (glj-decimal-unscaled-scale x))
                          :cljr (- (.Exponent ^clojure.lang.BigDecimal x))
                          :lpy (- (.-exponent (.as-tuple x)))
                          :default 0)
@@ -981,6 +1024,7 @@
     (host-decimal? x)
     #?(:jank x
        :clj (clojure.core/bigint (.unscaledValue ^java.math.BigDecimal x))
+       :glj (clojure.core/bigint (first (glj-decimal-unscaled-scale x)))
        :cljr (clojure.core/bigint (.Coefficient ^clojure.lang.BigDecimal x))
        :lpy (let [t (.as-tuple x)
                   mag (reduce (fn [acc d] (clojure.core/+ (* acc 10) d)) 0 (.-digits t))]
@@ -1022,6 +1066,7 @@
     (ratio? x) (/ (as-double (numerator x)) (as-double (denominator x)))
     (decimal? x) #?(:clje (float x)
                     :clj (double x)
+                    :glj (double x)
                     :cljs (let [u (.-unscaled x) s (.-scale x)]
                             (if (zero? s) (js/Number u)
                               (/ (js/Number u) (js/Number (bi-pow10 s)))))
@@ -1414,6 +1459,35 @@
         [(str (if (= a "") "0" a) b) (count b)]))
     (when (re-matches #"\d+" s)
       [s 0])))
+
+#?(:glj
+   (defn- glj-decimal-unscaled-scale
+     "Unscaled integer and scale of a glojure BigDecimal, from its
+      printed form (ToPlainString / str). *lang.BigDecimal has no
+      .scale or .unscaledValue; the string ctor keeps the original
+      text, including an E form from make-bigdec."
+     [x]
+     (let [s (str x)
+           neg? (= (first s) \-)
+           s (cond (= (first s) \-) (subs s 1)
+                   (= (first s) \+) (subs s 1)
+                   :else s)
+           e-idx (or (str/index-of s \e) (str/index-of s \E))
+           [digits frac-digits exp]
+           (if e-idx
+             (let [parts (split-decimal-significand (subs s 0 e-idx))
+                   exp (parse-exponent (subs s (inc e-idx)))]
+               (when (and parts exp)
+                 [(nth parts 0) (nth parts 1) exp]))
+             (when-let [parts (split-decimal-significand s)]
+               [(nth parts 0) (nth parts 1) 0]))]
+       (when digits
+         (let [scale (- frac-digits exp)
+               digits (or (second (re-matches #"^0+(.*)$" digits)) digits)
+               digits (if (= digits "") "0" digits)
+               u (bi-from digits)
+               u (if neg? (bi-neg u) u)]
+           [u scale])))))
 
 (defn- make-dec-from-parts [neg? digits frac-digits exp]
   (let [exp (or exp 0)
