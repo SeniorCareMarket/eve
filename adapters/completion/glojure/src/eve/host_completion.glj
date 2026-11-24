@@ -691,7 +691,11 @@
   (alter-var-root #'clojure.core/next
     (fn [_] (fn [x] (if (deftype-instance? x) (core-next (seq x)) (core-next x)))))
   (alter-var-root #'clojure.core/take
-    (fn [_] (fn [n x] (if (deftype-instance? x) (core-take n (seq x)) (core-take n x))))))
+    ;; both arities: (take n) is a transducer (measured: eve.thread-fold-test
+    ;; registered :take / :partition-by, "wrong number of arguments (1)",
+    ;; 2026-11-24 ET). The 2-arg arm still seq-coerces a deftype source.
+                  (fn [_] (fn ([n] (core-take n))
+                            ([n x] (if (deftype-instance? x) (core-take n (seq x)) (core-take n x)))))))
 
 ;; partition-by has the same defect inside its own body: it walks its
 ;; source with the host's first/rest, so a deftype source (a
@@ -702,9 +706,10 @@
 ;; rendezvous). Hand a deftype source over as its seq, as above.
 (let [core-partition-by @#'clojure.core/partition-by]
   (alter-var-root #'clojure.core/partition-by
-    (fn [_] (fn [f coll] (if (deftype-instance? coll)
-                           (core-partition-by f (seq coll))
-                           (core-partition-by f coll))))))
+                  (fn [_] (fn ([f] (core-partition-by f))
+                            ([f coll] (if (deftype-instance? coll)
+                                        (core-partition-by f (seq coll))
+                                        (core-partition-by f coll)))))))
 
 ;; mapv likewise (measured in the same probe): its body reaches the
 ;; source through into/reduce as the host built them, coercing a
