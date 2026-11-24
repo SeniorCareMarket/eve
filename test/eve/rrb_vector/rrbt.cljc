@@ -67,88 +67,142 @@
 (declare rrb-chunked-seq)
 
 (eve/host-deftype RRBChunkedSeq [vec node i off meta ^:mutable __hash]
-  Object
-  (toString [coll]
-    (pr-str* coll))
+                  Object
+                  (toString [coll]
+                            (pr-str* coll))
 
-  IPrintWithWriter
-  (-pr-writer [this writer opts]
-    (pr-sequential-writer writer pr-writer "(" " " ")" opts this))
+                  IPrintWithWriter
+                  (-pr-writer [this writer opts]
+                              (pr-sequential-writer writer pr-writer "(" " " ")" opts this))
 
-  IWithMeta
-  (-with-meta [coll m]
-    (rrb-chunked-seq vec node i off m))
+                  IWithMeta
+                  (-with-meta [coll m]
+                              (rrb-chunked-seq vec node i off m))
 
-  IMeta
-  (-meta [coll] meta)
+                  IMeta
+                  (-meta [coll] meta)
 
-  ISeqable
-  (-seq [coll] coll)
+                  ISeqable
+                  (-seq [coll] coll)
 
-  ISequential
-  IEquiv
-  (-equiv [coll other] (equiv-sequential coll other))
+                  ISequential
+                  IEquiv
+                  (-equiv [coll other] (equiv-sequential coll other))
 
-  ASeq
-  ISeq
-  (-first [coll]
-    (aget node off))
+                  ASeq
+                  ISeq
+                  (-first [coll]
+                          (aget node off))
 
-  (-rest [coll]
-    (if (< (inc off) (alength node))
-      (let [s (rrb-chunked-seq vec node i (inc off))]
-        (if (nil? s)
-          ()
-          s))
-      (-chunked-rest coll)))
+                  (-rest [coll]
+                         (if (< (inc off) (alength node))
+                           (let [s (rrb-chunked-seq vec node i (inc off))]
+                             (if (nil? s)
+                               ()
+                               s))
+                           (-chunked-rest coll)))
 
-  INext
-  (-next [coll]
-    (if (< (inc off) (alength node))
-      (let [s (rrb-chunked-seq vec node i (inc off))]
-        (if (nil? s)
-          nil
-          s))
-      (-chunked-next coll)))
+                  INext
+                  (-next [coll]
+                         (if (< (inc off) (alength node))
+                           (let [s (rrb-chunked-seq vec node i (inc off))]
+                             (if (nil? s)
+                               nil
+                               s))
+                           (-chunked-next coll)))
 
-  ICollection
-  (-conj [coll o]
-    (cons o coll))
+                  ICollection
+                  (-conj [coll o]
+                         (cons o coll))
 
-  IEmptyableCollection
-  (-empty [coll]
-    (with-meta () meta))
+                  IEmptyableCollection
+                  (-empty [coll]
+                          (with-meta () meta))
 
-  IChunkedSeq
-  (-chunked-first [coll]
-    (array-chunk node off))
+                  IChunkedSeq
+                  (-chunked-first [coll]
+                                  (array-chunk node off))
 
-  (-chunked-rest [coll]
-    (let [l (alength node)
-          s (when (< (+ i l) (-count vec))
-              (rrb-chunked-seq vec (+ i l) 0))]
-      (if (nil? s)
-        ()
-        s)))
+                  (-chunked-rest [coll]
+                                 (let [l (alength node)
+                                       s (when (< (+ i l) (-count vec))
+                                           (rrb-chunked-seq vec (+ i l) 0))]
+                                   (if (nil? s)
+                                     ()
+                                     s)))
 
-  IChunkedNext
-  (-chunked-next [coll]
-    (let [l (alength node)
-          s (when (< (+ i l) (-count vec))
-              (rrb-chunked-seq vec (+ i l) 0))]
-      (if (nil? s)
-        nil
-        s)))
+                  IChunkedNext
+                  (-chunked-next [coll]
+                                 (let [l (alength node)
+                                       s (when (< (+ i l) (-count vec))
+                                           (rrb-chunked-seq vec (+ i l) 0))]
+                                   (if (nil? s)
+                                     nil
+                                     s)))
 
-  IHash
-  (-hash [coll] (caching-hash coll hash-ordered-coll __hash))
+                  IHash
+                  (-hash [coll] (caching-hash coll hash-ordered-coll __hash))
 
-  IReduce
-  (-reduce [coll f]
-    (ci-reduce (subvec vec (+ i off) (count vec)) f))
+                  IReduce
+                  (-reduce [coll f]
+                           (ci-reduce (subvec vec (+ i off) (count vec)) f))
 
-  (-reduce [coll f start]
-    (ci-reduce (subvec vec (+ i off) (count vec)) f start)))
+                  (-reduce [coll f start]
+                           (ci-reduce (subvec vec (+ i off) (count vec)) f start))
+
+  ;; cljr-only: ClojureCLR casts Vector.seq to clojure.lang.ISeq, then
+  ;; eve.core/_chunked-next to clojure.lang.IChunkedSeq. host-deftype must
+  ;; not run jvm-translate-protos (that path broke Vector packing).
+                  #?@(:cljr [clojure.lang.Seqable
+                             (seq [coll] coll)
+                             clojure.lang.IPersistentCollection
+                             (count [coll] (- (-count vec) (+ i off)))
+                             (cons [coll o] (clojure.core/cons o coll))
+                             (empty [coll] (with-meta () meta))
+                             (equiv [coll other] (equiv-sequential coll other))
+                             clojure.lang.ISeq
+                             (first [coll]
+                                    (aget node off))
+                             (next [coll]
+                                   (if (< (inc off) (alength node))
+                                     (let [s (rrb-chunked-seq vec node i (inc off))]
+                                       (if (nil? s)
+                                         nil
+                                         s))
+                                     (.chunkedNext ^clojure.lang.IChunkedSeq coll)))
+                             (more [coll]
+                                   (let [s (if (< (inc off) (alength node))
+                                             (rrb-chunked-seq vec node i (inc off))
+                                             (.chunkedMore ^clojure.lang.IChunkedSeq coll))]
+                                     (if (nil? s)
+                                       ()
+                                       s)))
+                             clojure.lang.IChunkedSeq
+                             (chunkedFirst [coll]
+                                           (array-chunk node off))
+                             (chunkedNext [coll]
+                                          (let [l (alength node)
+                                                s (when (< (+ i l) (-count vec))
+                                                    (rrb-chunked-seq vec (+ i l) 0))]
+                                            (if (nil? s)
+                                              nil
+                                              s)))
+                             (chunkedMore [coll]
+                                          (let [l (alength node)
+                                                s (when (< (+ i l) (-count vec))
+                                                    (rrb-chunked-seq vec (+ i l) 0))]
+                                            (if (nil? s)
+                                              ()
+                                              s)))
+                             clojure.lang.IHashEq
+                             (hasheq [coll]
+                                     (caching-hash coll hash-ordered-coll __hash))
+                             clojure.lang.IReduceInit
+                             (reduce [coll f start]
+                                     (ci-reduce (subvec vec (+ i off) (count vec)) f start))
+                             clojure.lang.IReduce
+                             (reduce [coll f]
+                                     (ci-reduce (subvec vec (+ i off) (count vec)) f))]))
 
 (defn rrb-chunked-seq
   ([vec i off]
