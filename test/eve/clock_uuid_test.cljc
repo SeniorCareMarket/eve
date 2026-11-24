@@ -16,6 +16,9 @@
       (is (= u (uuid/from-longs (uuid/most-significant-bits u) (uuid/least-significant-bits u))))))
   (is (= "ffffffff-ffff-ffff-8000-000000000000" (str (uuid/from-longs -1 "-9223372036854775808"))))
   (is (= "7fffffff-ffff-ffff-0000-000000000001" (str (uuid/from-longs "9223372036854775807" 1))))
+  ;; leading zeros in a decimal string: stripped, one digit kept
+  (is (= (str (uuid/from-longs "0" "1")) (str (uuid/from-longs "000" "0001"))))
+  (is (= (str (uuid/from-longs "9223372036854775807" 0)) (str (uuid/from-longs "09223372036854775807" "00"))))
   (is (= "ffffffff-ffff-ffff-ffff-ffffffffffff" (str (uuid/from-string "FFFFFFFF-FFFF-FFFF-FFFF-FFFFFFFFFFFF"))))
   (doseq [s ["garbage" "0-0-0-0-0" "ffffffff-ffff-ffff-ffff-ffffffffffff junk"]]
     (is (try (uuid/from-string s) false (catch #?(:cljs :default :clje _ :jank jank.runtime.object_ref :default Exception) _ true))))

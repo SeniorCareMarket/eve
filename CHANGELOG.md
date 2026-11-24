@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Fixed (glojure): `eve.uuid` loads.** A decimal 64-bit string's leading zeros were stripped with a lookahead regex
+  (`#"^0+(?=.)"`), which Go's regexp rejects at read time (`invalid or unsupported Perl syntax: (?=`), so glojure
+  could not load `eve.uuid` or anything requiring it (eve.db.ds). It strips with `#"^0+"` and keeps one digit.
+
 - **Fixed (basilisp): a slab growth no longer forces past a small file's end.** `force-grown!` asked every grown
   file for a 64-byte force, but a small class's descriptor columns are 32 bytes; Python's `mmap.flush` refused the
   range (`ValueError: flush values out of range`), failing eve.db.ds's 500-person durable writes. It forces
