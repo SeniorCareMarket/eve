@@ -131,9 +131,16 @@ from 22).
   attempt binds `alloc/*inplace*` and, when it wrote into a block it did not allocate, forces its touched classes before
   its CAS and writes a NOREDO record. Rare (a mutable deftype field written inside a swap), so the fast path stays one
   flush.
-- **Record layout.** `[EVR3][seq][kind][label][nonce][writer][len][0]` (32 bytes), body, CRC-32. COMMIT body: the delta
+- **Record layout.** `[EVR3][seq][kind][label][nonce][writer][len][part]` (32 bytes), body, CRC-32. COMMIT body: the delta
   `[slot old new hash]`, `n-blocks × [off flags pointer len bytes]` (W1–W3; W2 is the offset), `n-pins × [off flags]`
   (W4). NOREDO: the delta alone. ANCHOR: the 2048-byte table.
+- **A large redo is a run of slots.** A commit's plan (before its CAS, after `hold-root!`: the blocks it allocated
+  that a holder took, the other rows its holds touched) sizes its body exactly; a body past one slot reserves CNT
+  consecutive seqs in one tail CAS (`eve.jlog/reserve-run!`) and is written as CNT parts, each a CRC-checked record
+  whose header word 28 carries its part index and count. The watermark forces the run in one msync (two when it wraps
+  the ring's end). Recovery and checkpoints read the prefix as logical records (`eve.jlog/logical`): a run with a part
+  missing, torn or voided drops out whole. Only a redo past a quarter of the ring takes the fallback. Measured: an
+  eve.db.ds transaction (~390 blocks allocated, ~450 rows touched) is a 3-4 slot run, ~12.6 KB.
 - **Atom-slot claims are records.** A claim (pointer := CLAIMED, the name hash) writes a delta-only NOREDO record and
   waits for it, so recovery keeps the slot claimed before the registry names it.
 - **The gate.** A commit may reserve up to half the ring past the newest durable anchor; at that mark it runs a

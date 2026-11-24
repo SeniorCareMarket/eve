@@ -101,9 +101,10 @@ epoch, writes one record — the delta (atom slot, old and new root) and the red
 bytes, their bitmap bits, flags and pointer columns, and the rows its holds touched, CRC-32 checked — then waits
 until the log's prefix watermark passes it. The watermark's msync is the commit point and the commit's one device
 flush; concurrent commits share it (group commit). Only then is the old root let go, so no block a durable state
-reaches is ever freed. A commit whose redo would not fit one 4 KiB slot, that allocates in the coalesced class, or
-that wrote in place into a block it did not allocate (an eve-deftype field inside the swap) forces its blocks before
-its CAS instead and writes a delta-only record.
+reaches is ever freed. A redo past one 4 KiB slot is written over a run of consecutive slots, forced by the same
+one msync. A commit whose redo would pass a quarter of the ring, that allocates in the coalesced class, or that wrote
+in place into a block it did not allocate (an eve-deftype field inside the swap) forces its blocks before its CAS
+instead and writes a delta-only record.
 
 Recovery (an open no live process holds) takes the root's hold word as its recovery hold, reads the newest anchor
 record and the consecutive valid records after it (the prefix: a missing or torn record ends it — no commit after

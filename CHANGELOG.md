@@ -11,8 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   classes it touched before its CAS (11 msyncs per commit measured on jolt); its record carries the delta and the
   bytes of its new blocks, it waits on the log's prefix watermark (one msync, shared by concurrent commits), and it
   lets its old root go only once the record is durable. Recovery replays the prefix over the newest anchor and pins
-  the rows it touched (a leak, never a use-after-free). Commits that cannot carry their redo (past one slot, the
-  coalesced class, an in-place deftype write) force before their CAS and log the delta only. v1 logs are moved to v2
+  the rows it touched (a leak, never a use-after-free). A large redo spans a run of slots, still one flush (an
+  eve.db.ds transaction on the JVM: 10.2-10.8 ms before, 5.3-6.4 ms after). Commits that cannot carry their redo
+  (past a quarter of the ring, the coalesced class, an in-place deftype write) force before their CAS and log the
+  delta only. v1 logs are moved to v2
   on the first open no other process holds (renamed `<base>.jlog.v1`); `:jlog-version 1` keeps v1.
   `doc/jlog-redo-spec.md`. **Fixed (Node):** the module slab's whole-domain force skipped the descriptor flags and
   pointer columns.
