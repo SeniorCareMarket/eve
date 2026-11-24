@@ -132,9 +132,13 @@
 
 (defn lookup [r k not-found]
   (let [i (first (keep-indexed (fn [i key] (when (= key k) i)) (-declared-keys r)))]
-    (if (nil? i)
-      (binding [context/*slab-values* true] (e/get (-extras r) k not-found))
-      (nth (-record-values r) i))))
+    ;; Declared fields too: *slab-values* was only bound on the extmap path,
+    ;; so a host whose reader-of materializes host collections (glojure)
+    ;; returned a plain vector from (e/get p :y) (record-operations).
+    (binding [context/*slab-values* true]
+      (if (nil? i)
+        (e/get (-extras r) k not-found)
+        (nth (-record-values r) i)))))
 
 (defn contains-key? [r k]
   (or (boolean (some #(= k %) (-declared-keys r))) (e/contains? (-extras r) k)))
@@ -186,8 +190,8 @@
     (record? x) [:eve.record/value (type-key x)
                  (mapv canonical (-record-values x)) (canonical (-extras x))]
     (map? x) (into {} (map (fn [[k v]] [(canonical k) (canonical v)])) x)
-    (set? x) (into #{} (map canonical) x)
-    (sequential? x) (mapv canonical x)
+    (or (set? x) (eve.set/eve-hash-set? x)) (into #{} (map canonical) x)
+    (or (sequential? x) (eve.vec/eve-vector? x)) (mapv canonical x)
     :else x))
 
 (defn hash-record [r]

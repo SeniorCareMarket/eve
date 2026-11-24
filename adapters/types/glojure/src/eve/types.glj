@@ -7,9 +7,10 @@
    clojure.core's deref, swap!, reset!, compare-and-set! and realized? reach a type. A registered collection reads as
    the host's own (glojure's collections, which clojure.core takes).
    The entry points eve's macros call (every eve.types has them):
-     host-type, plain-type, slab-type, eve-type, extend-eve-type,
+     host-type, plain-type, slab-type, eve-type, flat-type, extend-eve-type,
      existing-def, rename-fields, reader-of, print-form, vector-types."
   (:require [clojure.string :as str]
+            [eve.record-context]
             [eve.core]
             [eve.deftype-proto.vocab :as v :refer [impls->forms interface-sym? strip-cljs-core
                                                  cljs-protocol? cljs-translate-protocol]]
@@ -164,6 +165,17 @@
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
 (defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))
+(defn flat-type
+  "An eve-deftype's generated flat sister on glojure (FORMAT-V1 §6, lane H5).
+   Before this, the host registered the layout alone and a delivered flat
+   value read as the generic eve.view/ViewMap, which carries no IRecordData
+   or ISabpType (eve.record-test/persistent-record-survives-reopen: record?,
+   type-key, field handles and meta failed after reopen, 2026-11-24 ET).
+   The shared generator (eve.deftype-proto.sio/flat-type) with this host's
+   steps — interfaces onto eve.core's protocols, as on babashka and jank.
+   Mutable sister-hash__ uses the completion's T__make (hooks :build)."
+  [ctx]
+  (sio/flat-type ctx (hooks)))
 (defn extend-eve-type "eve-extend-type." [ctx] (sio/extend-eve-type ctx))
 
 (defn existing-def
@@ -177,11 +189,23 @@
   (sio/eve-renames fields body))
 
 (defn reader-of
-  "What a registered eve collection reads as on glojure: the host's own collection where one is given (host-value: a
-   type answers eve.core's protocols, not clojure.core's), else its eve type (from-header) — a map, which stands in for
-   glojure's own (the completion's map mode), as on babashka."
+  "What a registered eve collection reads as on glojure: a reader that
+   answers the eve type (from-header) when eve.record-context/*slab-values*
+   is true at read time — a durable record loads slab views, never a host
+   materialization (record-context's policy; the same switch babashka
+   uses). Otherwise the host's own collection where one is given
+   (host-value: a type answers eve.core's protocols, not clojure.core's),
+   else its eve type. reader-of itself runs at registration, so the
+   *slab-values* test must live in the returned fn (a compile-time check
+   always saw false and every read was a host vector; eve.record-test
+   record-operations and IFlatHandle after reopen, 2026-11-24 ET)."
   [from-header host-value]
-  (or host-value from-header))
+  (if host-value
+    `(fn [sio# header-off#]
+       (if eve.record-context/*slab-values*
+         (~from-header sio# header-off#)
+         (~host-value sio# header-off#)))
+    from-header))
 
 (defn print-form
   "The printer of a registered eve collection: none — a value read from eve memory is glojure's own collection."

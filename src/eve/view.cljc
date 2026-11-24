@@ -30,6 +30,9 @@
             ;; a reader-registering type is defined below: the registry must load first (a ClojureScript
             ;; bundle orders by requires; eve.deftype-guard-test's reader-registration-load-order)
             [eve.type-readers]
+            [eve.record-context :as record-context]
+            [eve.vec :as ev]
+            [eve.set :as es]
             [eve.core :as e]
             [eve.gc :as gc]))
 
@@ -162,9 +165,15 @@
 
 (deftype SlabSource [raw desc cell fl]
   source/IFieldSource
-  (-field [_ kw] (wrap (get (in cell (fn [] (sister/field-values desc raw))) kw) cell))
+  ;; *slab-values* so serialized fields stay eve collections and wrap can
+  ;; answer a view / IFlatHandle (glojure's reader-of otherwise materializes
+  ;; a host set, and (field p :extra) failed satisfies? IFlatHandle).
+  (-field [_ kw] (wrap (get (in cell (fn [] (binding [record-context/*slab-values* true]
+                                              (sister/field-values desc raw)))) kw) cell))
   (-field-map [_]
-    (into (array-map) (map (fn [[k x]] [k (wrap x cell)])) (in cell (fn [] (sister/field-values desc raw)))))
+    (into (array-map) (map (fn [[k x]] [k (wrap x cell)]))
+          (in cell (fn [] (binding [record-context/*slab-values* true]
+                            (sister/field-values desc raw))))))
   (-source-bytes [_] (chunk/bytes-of (consume raw fl cell)))
   IView
   (-raw [_] raw)
@@ -400,8 +409,13 @@
     (not (slab? x)) x
     (sister-desc x) (deftype-view x (sister-desc x) cell)
     (map? x) (ViewMap. x cell (volatile! nil))
-    (or (vector? x) (value-array? x)) (ViewVec. x cell (volatile! nil))
-    (set? x) (ViewSet. x cell (volatile! nil))
+    ;; eve-vector? / eve-hash-set?: on glojure, clojure.core/vector? and
+    ;; set? are false for a deftype (completion forces those predicates
+    ;; off so the codec does not treat a type as a host collection). A
+    ;; reopened record field was then deliver-flat'd to FlatTagged, and
+    ;; eve->clj of that dumped {:cnt :root-off} (2026-11-24 ET).
+    (or (vector? x) (value-array? x) (ev/eve-vector? x)) (ViewVec. x cell (volatile! nil))
+    (or (set? x) (es/eve-hash-set? x)) (ViewSet. x cell (volatile! nil))
     :else (freeze/deliver-flat x)))
 
 (defn- view-of

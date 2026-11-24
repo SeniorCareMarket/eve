@@ -592,6 +592,18 @@
   [f]
   (swap! unwrap-hook conj f))
 
+(defonce ^:private collection-preds
+  ;; eve.vec / eve.set register these at load: a host whose Eve collections
+  ;; are deftypes (glojure) keeps clojure.core/vector? and set? false for a
+  ;; type, so eve->clj's host-collection arms would miss.
+  (atom {}))
+
+(defn register-collection-pred!
+  "Register pred under kind (:vector or :set) for eve->clj materialization."
+  [kind pred]
+  (swap! collection-preds assoc kind pred)
+  pred)
+
 (defn- flat-of-fn
   "The registered kind arm, loading eve.flat.freeze (which registers it) the
    first time it is needed — as eve.atom's deref delivery resolves it: a
@@ -645,6 +657,16 @@
     (let [u (reduce (fn [x uf] (let [y (uf x)] (if (identical? y x) x (reduced y)))) v @unwrap-hook)]
       (if-not (identical? u v)
         (eve->clj u)
+    (let [preds @collection-preds
+          vp (:vector preds)
+          sp (:set preds)]
+      ;; Collection arms before flat-of: an EveHashSet is also a slab
+      ;; value, and flat-of would answer a tagged form whose slots print
+      ;; as {:cnt :root-off} instead of a host set (glojure, 2026-11-24 ET).
+      (cond
+        (and vp (vp v)) (mapv eve->clj v)
+        (and sp (sp v)) (into #{} (map eve->clj) v)
+        :else
     (let [h (flat-of-fn)
           f (when h (h v))]
       (cond
@@ -658,7 +680,7 @@
         (throw (ex-info "eve->clj: a persistent Eve value of no kind eve->clj knows"
                         {:type :eve/no-materialization
                          :value-type (str (type v))}))
-        :else v))))))
+        :else v))))))))
 
 (defprotocol IBulkAccess
   "Bulk typed-array access to EveArray data: the host's primitive array of
