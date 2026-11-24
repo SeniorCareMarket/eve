@@ -16,6 +16,7 @@
                 :cljs [[cljs.reader :as reader]]
                 :bb [[clojure.edn :as edn]]
                 :lpy [[clojure.edn :as edn]]
+                :glj [[clojure.edn :as edn]]
                 :default []))
   #?(:lpy (:import io sys basilisp.lang.obj basilisp.lang.reader)))
 
@@ -63,12 +64,28 @@
    ;; is public and is honored where changing *data-readers*' root is not.
    (let [previous *default-data-reader-fn*]
      (alter-var-root #'*default-data-reader-fn*
-       (constantly
-         (fn [tag value]
-           (if-let [read-fn (get (registry/data-readers) tag)]
-             (read-fn value)
-             (if previous (previous tag value)
-               (throw (ex-info "No reader function for tag" {:tag tag})))))))))
+                     (constantly
+                      (fn [tag value]
+                        (if-let [read-fn (get (registry/data-readers) tag)]
+                          (read-fn value)
+                          (if previous (previous tag value)
+                              (throw (ex-info "No reader function for tag" {:tag tag}))))))))
+   :glj
+   ;; glojure honors *data-readers* and *default-data-reader-fn*, but with
+   ;; both nil a tagged literal becomes [tag value] instead of throwing or
+   ;; consulting Eve's registry (measured: eve.type-io-test, pr-str of
+   ;; #example/custom read back as "[example/custom {:x 42}]", 2026-11-24 ET).
+   ;; Unknown tags keep that [tag value] default: throwing here broke
+   ;; loading eve.reference-tag-test (a tagged literal the registry does
+   ;; not own, 2026-11-24 ET).
+   (let [previous *default-data-reader-fn*]
+     (alter-var-root #'*default-data-reader-fn*
+                     (constantly
+                      (fn [tag value]
+                        (if-let [read-fn (get (registry/data-readers) tag)]
+                          (read-fn value)
+                          (if previous (previous tag value)
+                              [tag value])))))))
 
 (defn register!
   "Install tag -> reader in the host registry (repeat loading replaces it).
@@ -126,6 +143,21 @@
    ;; SCI's default-data-readers is not the native EDNReader var. Bridge the
    ;; ordinary public reader functions once, rather than requiring options in
    ;; every consumer. Explicit per-call readers still win.
+   (let [native-read edn/read native-read-string edn/read-string
+         options reader-options]
+     (alter-var-root #'edn/read-string
+                     (fn [_] (fn
+                               ([s] (native-read-string (options {}) s))
+                               ([opts s] (native-read-string (options opts) s)))))
+     (alter-var-root #'edn/read
+                     (fn [_] (fn
+                               ([r] (native-read (options {}) r))
+                               ([opts r] (native-read (options opts) r))))))
+   :glj
+   ;; Same bridge: clojure.edn on glojure is Eve's completion (edn.glj),
+   ;; which merges *data-readers* but not Eve's registry. reader-options
+   ;; puts the registry first so typetag print/read works without a
+   ;; per-call :readers option.
    (let [native-read edn/read native-read-string edn/read-string
          options reader-options]
      (alter-var-root #'edn/read-string
