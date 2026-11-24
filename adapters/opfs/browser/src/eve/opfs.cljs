@@ -14,8 +14,14 @@
    bytes changed since it last wrote them).
 
    A request blocks its caller (Atomics.wait): a worker's call. The page's main
-   thread starts the pool (eve.opfs.mount) and never opens a file."
+   thread starts the pool (eve.opfs.mount) and never opens a file.
+
+   The relay pool (W10: a page that is not cross-origin isolated, whose workers share no memory): one worker, the
+   domain host, holds the request block and the slots itself (SharedArrayBuffers of its own: sab-constructor), and
+   each request goes to its io worker over eve's service worker relay (eve.opfs.relay) — the block's prefix out and
+   back, a sync's changed bytes out (found against a shadow copy of what the file holds), an open's file bytes back."
   (:require
+   [eve.opfs.relay :as relay]
    [eve.region :as region]
    [eve.region.opfs :as ropfs]))
 
@@ -41,9 +47,18 @@
 
 (def ^:private ops
   {:open 1 :persist 2 :exists 3 :size 4 :create-exclusive 5 :rename 6 :delete 7 :close-all 8 :mkdirs 9
-   :persist-changed 10 :follow-call 11})
+   :persist-changed 10 :follow-call 11 :nop 12})
 
 (defonce ^:private pool (atom nil))
+
+(defn sab-constructor
+  "SharedArrayBuffer's constructor: the global's, or where a page is not cross-origin isolated (no global) a shared
+   WebAssembly.Memory's buffer's, which every engine still makes: a buffer of it serves this worker alone (it cannot
+   be posted to another)."
+  []
+  (if (exists? js/SharedArrayBuffer)
+    js/SharedArrayBuffer
+    (.-constructor (.-buffer (js/WebAssembly.Memory. #js {:initial 0 :maximum 1 :shared true})))))
 
 (defn available?
   "true where this context can hold the pool: shared memory (cross-origin
@@ -92,12 +107,65 @@
   (js/Atomics.store ctl LOCK 0)
   (js/Atomics.notify ctl LOCK 1))
 
+(defn- frame [^js prefix ^js extra]
+  (let [out (js/Uint8Array. (+ 8 (.-length prefix) (.-length extra)))
+        h (js/DataView. (.-buffer out))]
+    (.setUint32 h 0 (.-length prefix) true)
+    (.setUint32 h 4 (.-length extra) true)
+    (.set out prefix 8)
+    (.set out extra (+ 8 (.-length prefix)))
+    out))
+
+(defn- unframe [^js b]
+  (let [h (js/DataView. (.-buffer b) (.-byteOffset b) 8)
+        n (.getUint32 h 0 true)
+        m (.getUint32 h 4 true)]
+    [(.subarray b 8 (+ 8 n)) (.subarray b (+ 8 n) (+ 8 n m))]))
+
+(defn- slot-buffer
+  "The relay pool's slot i, made (growable, to the pool's largest file) when first used."
+  [^js p i]
+  (or (aget (.-slots p) i)
+      (aset (.-slots p) i (let [C (sab-constructor)] (C. 0 #js {:maxByteLength (.-maxFileBytes p)})))))
+
+(defn- relay-exchange!
+  "The relay pool's round trip: the request block's prefix (and extra bytes) to the io worker, its answer's prefix
+   back into the block; an open's file bytes into the slot (only past what this worker already holds of it: its
+   own bytes there are newer than the file's until it syncs them), and into the slot's shadow."
+  [^js p ^js extra]
+  (let [^js ctl (js/Int32Array. (.-ctl p))
+        bytes (js/Uint8Array. (.-ctl p))
+        sbase (* 4 (+ ARGS (.-argsWords p)))
+        [^js prefix ^js ext] (unframe (relay/call! (.-relay p)
+                                                   (frame (.subarray bytes 0 (+ sbase (aget ctl NSTR)))
+                                                          (or extra (js/Uint8Array. 0)))
+                                                   {:timeout-ms 60000}))]
+    (.set bytes prefix 0)
+    (when (and (zero? (aget ctl STATUS)) (= (get ops :open) (aget ctl OP)))
+      (let [slot (aget ctl R0)
+            flen (aget ctl R1)
+            ^js b (slot-buffer p slot)
+            held (if (== 1 (aget ctl R2)) 0 (or (aget (.-lens p) slot) 0))]
+        (when (< (.-byteLength b) flen) (.grow b flen))
+        (when (< held flen) (.set (js/Uint8Array. b) (.subarray ext held flen) held))
+        (when (== 1 (aget ctl R2)) (.fill (js/Uint8Array. b) 0 flen))   ; a reused slot: past the file, zeros
+        (aset (.-lens p) slot (max held flen))
+        (let [old (aget (.-shadows p) slot)
+              sh (js/Uint8Array. flen)]
+          (if (== 1 (aget ctl R2))
+            (.set sh (.subarray ext 0 flen))
+            (do (when old (.set sh (.subarray old 0 (min flen (.-length old)))))
+                (when (< held flen) (.set sh (.subarray ext held flen) held))))
+          (aset (.-shadows p) slot sh))))))
+
 (defn- request!
   "Send op to the io worker and block for its answer: [r0 r1 r2]; throws its error.
    args: int words (a JS array or nil); strs: strings (joined by NUL), or raw bytes (a Uint8Array) for the string
-   area. With a reply-bytes atom, the string area's bytes after the answer are put there."
-  ([op args strs] (request! op args strs nil))
-  ([op ^js args strs reply]
+   area. With a reply-bytes atom, the string area's bytes after the answer are put there. extra: the relay pool's
+   bytes after the block (a persist's runs)."
+  ([op args strs] (request! op args strs nil nil))
+  ([op args strs reply] (request! op args strs reply nil))
+  ([op ^js args strs reply extra]
    (let [^js p   (the-pool)
          ^js ctl (js/Int32Array. (.-ctl p))
          bytes   (js/Uint8Array. (.-ctl p))
@@ -115,13 +183,15 @@
        (dotimes [i nargs] (aset ctl (+ ARGS i) (aget args i)))
        (aset ctl NSTR (.-length sbytes))
        (.set bytes sbytes sbase)
-       (js/Atomics.store ctl DONE 0)
-       (js/Atomics.add ctl DOORBELL 1)
-       (js/Atomics.notify ctl DOORBELL)
-       (loop []
-         (when (zero? (js/Atomics.load ctl DONE))
-           (js/Atomics.wait ctl DONE 0 1000)
-           (recur)))
+       (if (.-relay p)
+         (relay-exchange! p extra)
+         (do (js/Atomics.store ctl DONE 0)
+             (js/Atomics.add ctl DOORBELL 1)
+             (js/Atomics.notify ctl DOORBELL)
+             (loop []
+               (when (zero? (js/Atomics.load ctl DONE))
+                 (js/Atomics.wait ctl DONE 0 1000)
+                 (recur)))))
        (let [status (aget ctl STATUS)]
          (if (zero? status)
            (do (when reply (reset! reply (.slice bytes sbase (+ sbase (aget ctl NSTR)))))
@@ -139,8 +209,24 @@
 (defn- ctl-word [i]
   (when-let [^js p (pool-of)] (js/Atomics.load (js/Int32Array. (.-ctl p)) i)))
 
+(defn note-role!
+  "The relay pool's role as its io worker last told it (eve.opfs.mount): its block's words say so until the next
+   request brings them back."
+  [owner? term]
+  (let [^js ctl (js/Int32Array. (.-ctl ^js (the-pool)))]
+    (aset ctl ROLE (if owner? 1 0))
+    (aset ctl (if owner? TERM SEEN-TERM) term)
+    nil))
+
+(defn- refresh!
+  "The relay pool's block words (role, term, commits) as the io worker has them now; nothing elsewhere."
+  []
+  (when (some-> (pool-of) .-relay) (request! :nop #js [] nil))
+  nil)
+
 (defn owner?
-  "true when this tab owns the files (its io worker holds the root's Web Lock)."
+  "true when this tab owns the files (its io worker holds the root's Web Lock). The relay pool's says what its last
+   request heard."
   []
   (= 1 (ctl-word ROLE)))
 
@@ -162,11 +248,12 @@
   (let [^js ctl (js/Int32Array. (.-ctl ^js (the-pool)))
         deadline (+ (js/Date.now) ms)]
     (loop []
+      (refresh!)
       (let [role (js/Atomics.load ctl ROLE)
             left (- deadline (js/Date.now))]
         (cond (= 1 role) true
               (not (pos? left)) false
-              :else (do (js/Atomics.wait ctl ROLE role (min left 1000)) (recur)))))))
+              :else (do (js/Atomics.wait ctl ROLE role (min left (if (.-relay ^js (the-pool)) 100 1000))) (recur)))))))
 
 (defn no-owner?
   "true when e is a follower's call no owner answered (no owner tab, or one taking over)."
@@ -185,6 +272,7 @@
   "How many owner commits this follower tab has heard of (announced on the channel); an owner's own count of file
    writes. A value a follower read before the count moved may be stale."
   []
+  (refresh!)
   (ctl-word COMMITS))
 
 (defn next-seq!
@@ -207,11 +295,63 @@
   []
   (.-svc ^js (the-pool)))
 
+;; The relay pool's sync: the runs' bytes go with the request (and into the slot's shadow)
+(defn- run-bytes [^js p slot ^js runs]
+  (let [^js src (js/Uint8Array. (slot-buffer p slot))
+        ^js sh (aget (.-shadows p) slot)
+        total (loop [i 1 t 0] (if (< i (.-length runs)) (recur (+ i 2) (+ t (aget runs (inc i)))) t))
+        out (js/Uint8Array. total)]
+    (loop [i 1 at 0]
+      (when (< i (.-length runs))
+        (let [off (aget runs i)
+              len (aget runs (inc i))
+              v (.subarray src off (+ off len))]
+          (.set out v at)
+          (when sh (.set sh (.subarray v 0 (max 0 (min len (- (.-length sh) off)))) off))
+          (recur (+ i 2) (+ at len)))))
+    out))
+
+(def ^:private PAGE 4096)
+
+(defn- changed-runs
+  "The relay pool's changed pages of slot: page-aligned [off len] runs (at most 1 MiB each) where the slot's bytes
+   differ from its shadow (what the file holds)."
+  [^js p slot]
+  (let [^js b (slot-buffer p slot)
+        ^js sh (aget (.-shadows p) slot)
+        len (if sh (.-length sh) 0)
+        a (js/Int32Array. b 0 (quot len 4))
+        s (js/Int32Array. (.-buffer sh) (.-byteOffset sh) (quot len 4))
+        u (js/Uint8Array. b)
+        page-changed? (fn [off]
+                        (let [end (min len (+ off PAGE))
+                              wend (* 4 (quot end 4))]
+                          (or (loop [i (quot off 4)] (cond (>= (* 4 i) wend) false
+                                                           (not= (aget a i) (aget s i)) true
+                                                           :else (recur (inc i))))
+                              (loop [j wend] (cond (>= j end) false
+                                                   (not= (aget u j) (aget sh j)) true
+                                                   :else (recur (inc j)))))))
+        runs #js []]
+    (loop [off 0 start -1]
+      (if (>= off len)
+        (when (>= start 0) (.push runs start (- len start)))
+        (let [c? (page-changed? off)]
+          (cond
+            (and c? (< start 0)) (recur (+ off PAGE) off)
+            (and c? (>= (- (+ off PAGE) start) (* 1024 1024))) (do (.push runs start (- (min len (+ off PAGE)) start))
+                                                                   (recur (+ off PAGE) -1))
+            c? (recur (+ off PAGE) start)
+            (>= start 0) (do (.push runs start (- off start)) (recur (+ off PAGE) -1))
+            :else (recur (+ off PAGE) -1)))))
+    runs))
+
 ;; The store a region syncs through: a request per batch of runs the block holds
 (deftype IoStore []
   ropfs/IRegionStore
   (-persist! [_ slot runs]
-    (let [cap (- (.-argsWords ^js (the-pool)) 1)
+    (let [^js p (the-pool)
+          cap (- (.-argsWords p) 1)
           cap (- cap (mod cap 2))
           n   (.-length runs)]
       (loop [i 0]
@@ -219,10 +359,19 @@
           (let [j (min n (+ i cap))
                 a (.slice runs i j)]
             (.unshift a slot)
-            (request! :persist a #js [])
+            (request! :persist a #js [] nil (when (.-relay p) (run-bytes p slot a)))
             (recur j))))))
-  (-persist-changed! [_ slot]
-    (request! :persist-changed #js [slot] #js [])))
+  (-persist-changed! [this slot]
+    (let [^js p (the-pool)]
+      (if (.-relay p)
+        (let [runs (changed-runs p slot)
+              pages (loop [i 0 n 0] (if (< i (.-length runs))
+                                      (recur (+ i 2) (+ n (js/Math.ceil (/ (aget runs (inc i)) PAGE))))
+                                      n))]
+          (when (pos? (.-length runs)) (ropfs/-persist! this slot runs))
+          (set! (.-pagesSent p) (+ (or (.-pagesSent p) 0) pages))   ; the pages its syncs sent (a test's)
+          [pages 0 0])
+        (request! :persist-changed #js [slot] #js [])))))
 
 (def ^:private io-store (IoStore.))
 
@@ -233,7 +382,7 @@
   [path size]
   (let [[slot _len fresh] (request! :open #js [size] [path])
         ^js p (the-pool)]
-    (ropfs/opfs-region (aget (.-slots p) slot) size io-store slot (== 1 fresh))))
+    (ropfs/opfs-region (if (.-relay p) (slot-buffer p slot) (aget (.-slots p) slot)) size io-store slot (== 1 fresh))))
 
 (defn file-size
   "The file's byte length, or nil when there is none."

@@ -6,12 +6,28 @@
    that does and takes over when that tab goes (eve.opfs/owner?, on-role!)."
   (:require
    [eve.opfs :as opfs]
-   [eve.opfs.follow]
+   [eve.opfs.follow :as follow]
    [eve.opfs.relay :as relay]
    [eve.thread-host :as h]
    [shadow.resource :as rc]))
 
 (def ^:private io-js (rc/inline "eve/opfs_io.js"))
+
+;; The relay pool's io worker (W10) is the program's own kernel, loaded with ?eve-opfs-io=1 (a worker from a URL of
+;; the site, so eve's service worker controls it — Firefox does not give a worker's Blob-URL worker to it): this
+;; namespace then runs the io worker's script in it, before the kernel's own start
+(when (and (exists? js/WorkerGlobalScope) (exists? js/location)
+           (re-find #"[?&]eve-opfs-io=1(&|$)" (str (.-search js/location))))
+  (js/importScripts (.createObjectURL js/URL (js/Blob. #js [io-js] #js {:type "text/javascript"}))))
+
+(defn- relay-io-worker
+  "The relay pool's io worker: the kernel this worker was started from, with ?eve-opfs-io=1; from a Blob of the io
+   script where this worker's own URL is one (no kernel URL to start)."
+  []
+  (let [loc (.-location js/self)]
+    (if (= "blob:" (.-protocol loc))
+      (js/Worker. (.createObjectURL js/URL (js/Blob. #js [io-js] #js {:type "text/javascript"})))
+      (js/Worker. (str (.-origin loc) (.-pathname loc) "?eve-opfs-io=1")))))
 
 (def default-opts
   "mount!'s defaults: the OPFS directory eve's paths are under, the pool's files open at once (slots;
@@ -107,11 +123,69 @@
   (when (and (= "owner" role) (.-mounted p)) (serve-followers!) (serve-relay!))   ; before the mount, ready starts them
   (doseq [f @listeners] (f role term)))
 
+(defn- mount-relay!
+  "The relay pool (W10), in the one worker of a page that is not cross-origin isolated (the domain host): its own
+   request block and slots, and its own io worker, reached over eve's service worker relay. SharedArrayBuffer
+   becomes the global (eve.opfs/sab-constructor) so eve's memory works in this worker. When this tab owns the files
+   it serves follower calls (eve.opfs.follow/serve-relay!)."
+  [{:keys [root slots max-file-bytes args-words string-bytes]}]
+  (let [C (opfs/sab-constructor)
+        _ (when-not (exists? js/SharedArrayBuffer) (set! (.-SharedArrayBuffer js/globalThis) C))
+        tab (str (js/Date.now) "-" (.toString (rand-int 0x7fffffff) 36))
+        p #js {:relay (str "eve-io:" tab) :ctl (C. (+ (* 4 (+ opfs/ARGS args-words)) string-bytes))
+               :argsWords args-words :slots #js [] :shadows #js [] :lens #js [] :maxFileBytes max-file-bytes
+               :tab tab :root root}
+        w (relay-io-worker)
+        serving (atom nil)
+        serve! (fn [] (when (and (= "owner" (.-role p)) (nil? @serving))
+                        (reset! serving (follow/serve-relay! (relay/host-for root) (.-term p)))))]
+    (set! (.-__eve_opfs_io js/globalThis) w)
+    (js/Promise.
+     (fn [resolve reject]
+       (set! (.-onmessage w)
+             (fn [e]
+               (let [d (.-data e)]
+                 (when (.-eveOpfsReady d)
+                   (set! (.-mode p) (.-mode d))
+                   (set! (.-role p) (.-role d))
+                   (set! (.-term p) (.-term d))
+                   (opfs/use-pool! p)
+                   (opfs/note-role! (= "owner" (.-role d)) (.-term d))
+                   (set! (.-mounted p) true)
+                   (serve!)
+                   (resolve p))
+                 (when (.-eveOpfsRole d)
+                   (set! (.-role p) (.-eveOpfsRole d))
+                   (set! (.-term p) (.-term d))
+                   (when (.-mounted p) (opfs/note-role! true (.-term d)) (serve!))
+                   (doseq [f @listeners] (f (.-role p) (.-term p))))
+                 (when (false? (.-eveOpfsReady d))
+                   (reject (js/Error. (str "eve.opfs: the io worker failed: " (.-error d))))))))
+       (set! (.-onerror w) (fn [e] (reject (js/Error. (str "eve.opfs: the io worker failed: " (.-message e))))))
+       (.postMessage w #js {:eveOpfsBoot true :relay (.-relay p) :ownerHost (relay/host-for root)
+                            :argsWords args-words :stringBytes string-bytes :slotCount slots
+                            :maxFileBytes max-file-bytes :root root :tab tab})))))
+
+(defn- relay-context?
+  "A worker of a page that is not cross-origin isolated: the relay pool's place."
+  []
+  (and (exists? js/WorkerGlobalScope) (not (true? js/crossOriginIsolated))))
+
+(declare mount-page!)
+
 (defn mount!
   "On the page, before any eve thread starts: make the pool and start its io worker over the OPFS directory
    (:root opts). A promise of the pool, shared (eve.thread-host/share!) with every worker the page starts after it
-   resolves — its .role \"owner\" or \"follower\", its .term — rejected when the io worker cannot open OPFS."
+   resolves — its .role \"owner\" or \"follower\", its .term — rejected when the io worker cannot open OPFS.
+   In a worker of a page that is not cross-origin isolated (W10), the relay pool instead: that worker alone holds
+   eve's memory and its files (mount-relay!)."
   ([] (mount! {}))
+  ([opts]
+   (if (relay-context?)
+     (mount-relay! (merge default-opts opts))
+     (mount-page! opts))))
+
+(defn- mount-page!
   ([opts]
    (let [opts (merge default-opts opts)
          p    (make-pool opts)

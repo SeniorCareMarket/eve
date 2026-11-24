@@ -35,7 +35,7 @@ const LOCK = 0, DOORBELL = 1, DONE = 2, OP = 3, STATUS = 4, R0 = 5, R1 = 6, R2 =
 const S_REQ = 0, S_RESP = 1, S_LEN = 2, S_BYTES = 16, CALL_MS = 10000;
 const FOLLOWER = 0, OWNER = 1;
 const OPEN = 1, PERSIST = 2, EXISTS = 3, SIZE = 4, CREATE_EXCL = 5, RENAME = 6, DELETE = 7, CLOSE_ALL = 8,
-      MKDIRS = 9, PERSIST_CHANGED = 10, FOLLOW_CALL = 11;
+      MKDIRS = 9, PERSIST_CHANGED = 10, FOLLOW_CALL = 11, NOP = 12;
 const PAGE = 4096, BOUNCE = 1 << 20;
 let ctl, ctlBytes, argsCap, strBase, slots, root, nextSlot = 0, handleOpts, tab, channel, svc, svcBytes;
 let callSeq = 0, announcing = false;
@@ -48,6 +48,11 @@ const bySlot = [];              // slot -> {path, handle, hashes: Int32Array, 2 
 const bounce = new Uint8Array(BOUNCE);
 const bounce32 = new Int32Array(bounce.buffer);
 const decoder = new TextDecoder(), encoder = new TextEncoder();
+let relayHost = null, ownerHost = null, maxFileBytes = 0;   // the relay mode's (W10)
+// SharedArrayBuffer's constructor: the global's, or (a page not cross-origin isolated has none) a shared
+// WebAssembly.Memory's buffer's, which every engine still makes — usable in this worker alone
+const SAB = typeof SharedArrayBuffer === 'function' ? SharedArrayBuffer
+  : new WebAssembly.Memory({initial: 0, maximum: 1, shared: true}).buffer.constructor;
 
 // A page's 64-bit hash (two 32-bit lanes) over its bytes [off, end): i32 words, then a tail of bytes.
 let H1 = 0, H2 = 0;
@@ -101,6 +106,7 @@ async function fileHandle(path, create) {
 function notFound(e) { return e && (e.name === 'NotFoundError' || e.name === 'TypeMismatchError'); }
 
 function growTo(slot, len) {
+  if (!slots[slot]) slots[slot] = new SAB(0, {maxByteLength: maxFileBytes});   // relay mode: made when first used
   const b = slots[slot];
   if (b.byteLength < len) b.grow(len);
 }
@@ -339,8 +345,65 @@ function replyTo(c, bytes) {
   else channel.postMessage({eveReply: {to: c.from, id: c.id, bytes}});
 }
 
+// The relay mode's owner (W10): its follower server is the domain host's eve.opfs.follow/serve-relay!, on the
+// service worker's relay under ownerHost; the queued calls go there, one at a time
+function pumpRelay() {
+  if (serving || queue.length === 0) return;
+  const c = serving = queue.shift();
+  const k = tab + '.io.' + (++callSeq);
+  const ask = () => fetch(location.origin + '/eve-sw/opfs/call?to=' + encodeURIComponent(ownerHost) + '&k=' + k + '&ms=25000',
+                          {method: 'POST', body: c.bytes})
+    .then((r) => r.status === 504 ? ask() : r.status === 200 ? r.arrayBuffer().then((b) => new Uint8Array(b)) : null);
+  ask().catch(() => null).then((bytes) => { replyTo(c, bytes); serving = null; pump(); });
+}
+
+// The relay mode (W10: a page not cross-origin isolated): the domain host (one worker, eve.opfs's relay pool)
+// keeps its own request block and slots; each request comes over the service worker's relay under relayHost as
+// [prefix length, extra length] (u32s), the request block's prefix (header, args, strings) and extra bytes (a
+// PERSIST's runs, in order), is served by serve() over this worker's copy of the block and its mirror slots, and
+// is answered the same way: the block's prefix back, and an OPEN's file bytes as extra
+function unframe(b) {
+  const h = new DataView(b.buffer, b.byteOffset, 8), n = h.getUint32(0, true), m = h.getUint32(4, true);
+  return [b.subarray(8, 8 + n), b.subarray(8 + n, 8 + n + m)];
+}
+function frame(prefix, extra) {
+  const out = new Uint8Array(8 + prefix.length + extra.length), h = new DataView(out.buffer);
+  h.setUint32(0, prefix.length, true); h.setUint32(4, extra.length, true);
+  out.set(prefix, 8); out.set(extra, 8 + prefix.length);
+  return out;
+}
+async function relayServe(req) {
+  const [prefix, extra] = unframe(req);
+  ctlBytes.set(prefix, 0);
+  if (ctl[OP] === PERSIST && extra.length > 0 && Atomics.load(ctl, ROLE) === OWNER) {
+    const e = openSlot(ctl[ARGS]), dst = new Uint8Array(slots[e.slot]);
+    let at = 0;
+    for (let i = 1; i + 1 < ctl[NARGS]; i += 2) {
+      const off = ctl[ARGS + i], len = ctl[ARGS + i + 1];
+      dst.set(extra.subarray(at, at + len), off); at += len;
+    }
+  }
+  ctl[STATUS] = 0; ctl[R2] = 0;
+  try { await serve(); } catch (err) { fail(err); }
+  const out = ctlBytes.slice(0, strBase + ctl[NSTR]);
+  const ext = ctl[STATUS] === 0 && ctl[OP] === OPEN ? new Uint8Array(slots[ctl[R0]]).slice(0, ctl[R1]) : new Uint8Array(0);
+  return frame(out, ext);
+}
+async function relayLoop() {
+  const q = location.origin + '/eve-sw/opfs/next?host=' + encodeURIComponent(relayHost) + '&term=1&ms=25000';
+  for (;;) {
+    let r;
+    try { r = await fetch(q, {cache: 'no-store'}); } catch (err) { await new Promise((ok) => setTimeout(ok, 500)); continue; }
+    if (r.status !== 200) continue;
+    const k = r.headers.get('X-Eve-Key');
+    const reply = await relayServe(new Uint8Array(await r.arrayBuffer()));
+    await fetch(location.origin + '/eve-sw/opfs/reply?k=' + encodeURIComponent(k), {method: 'POST', body: reply}).catch(() => null);
+  }
+}
+
 // The owner: the next queued call into the svc block, its reply posted back when the server sets S_RESP
 function pump() {
+  if (ownerHost) return pumpRelay();
   if (serving || queue.length === 0 || !svc) return;
   const c = queue.shift();
   if (c.bytes.length > svcBytes.length - 4 * S_BYTES) { replyTo(c, null); return pump(); }
@@ -370,6 +433,7 @@ function awaitReply(req) {
 async function serve() {
   const op = ctl[OP], nargs = ctl[NARGS];
   if (op === FOLLOW_CALL) return followCall();
+  if (op === NOP) return;   // the relay mode's: the block's words (role, term, commits) come back
   if (Atomics.load(ctl, ROLE) !== OWNER)
     throw new EveNotOwner('this tab follows the owner of ' + root.name + ' (term ' + Atomics.load(ctl, SEEN_TERM) + ')');
   const s = strings();
@@ -432,6 +496,11 @@ self.onmessage = async (ev) => {
     else self.postMessage({eveRelayReply: {id: c.id, bytes: null}});
   };
   try {
+    if (d.relay) {   // the relay mode (W10): this worker's own block and mirror slots, made here
+      relayHost = String(d.relay); ownerHost = String(d.ownerHost); maxFileBytes = d.maxFileBytes;
+      d.ctl = new SAB(4 * (ARGS + d.argsWords) + d.stringBytes);
+      d.slots = new Array(d.slotCount).fill(null);
+    }
     ctl = new Int32Array(d.ctl); ctlBytes = new Uint8Array(d.ctl);
     argsCap = d.argsWords; strBase = 4 * (ARGS + argsCap);
     slots = d.slots;
@@ -479,5 +548,5 @@ self.onmessage = async (ev) => {
     self.postMessage({eveOpfsReady: false, error: String(err && err.stack || err)});
     return;
   }
-  loop();
+  if (relayHost) relayLoop(); else loop();
 };

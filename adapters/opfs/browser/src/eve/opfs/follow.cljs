@@ -84,6 +84,16 @@
             (js/Atomics.notify svc S-RESP)
             (recur req)))))))
 
+(defn serve-relay!
+  "The relay pool's follower server (W10: the domain host's, a page not cross-origin isolated): answer the calls its
+   io worker forwards, and other workers', on eve's service worker relay under host (eve.opfs.relay/host-for its
+   root) in term. Answers a fn that stops it."
+  [host term]
+  (relay/serve! host term
+                (fn [req]
+                  (wire/encode (try (handle (wire/decode req))
+                                    (catch :default e {:ok false :error (str e)}))))))
+
 ;; ---- the follower atom
 
 (defonce ^:private my-seq (atom 0))
