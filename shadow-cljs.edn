@@ -81,6 +81,15 @@
    :modules {:main {:init-fn eve.runner.thread-browser-main/init}}
    :compiler-options {:optimizations :simple :output-wrapper false :load-tests true}}
 
+  ;; eve's OPFS disk tier in a browser (bb test:browser with EVE_BROWSER_OPFS=1): the page mounts the OPFS pool
+  ;; before its threads start (eve.opfs/mount!), then runs the OPFS suites in a worker
+  :eve-opfs-browser
+  {:target :browser
+   :output-dir "target/opfs-browser/public/js"
+   :asset-path "/js"
+   :modules {:main {:init-fn eve.runner.opfs-browser-main/init}}
+   :compiler-options {:optimizations :simple :output-wrapper false :load-tests true}}
+
   ;; eve's performance suite in a browser (bb test:browser with EVE_BROWSER_PERF=1): the same route as the
   ;; conformance page, a page of its own (the suite loads eve.alpha, which readies a module slab in every worker)
   :eve-perf-browser

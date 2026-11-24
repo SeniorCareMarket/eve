@@ -51,6 +51,10 @@
 
 (defn- ours? [] (some? (init-data)))
 
+;; What the page gives every worker it creates besides the mailboxes (share!): a feature's pool of shared memory
+;; that must reach a worker before it runs, e.g. eve.opfs's file pool (the pool-boot mount)
+(defonce ^:private shared-js #js {})
+
 (defn- can-block? [] (not (exists? js/document)))
 
 (defn- shared [sab] {:sab sab :ctl (js/Int32Array. sab 0 CTL-WORDS) :bytes (js/Uint8Array. sab)})
@@ -87,6 +91,20 @@
    :spawn-ms (js/Atomics.load (:ctl (mem)) SPAWN-MS) :max-threads (dec MAX) :runtime :browser})
 
 (defn self [] (:self @state))
+
+(defn share!
+  "On the page: v (structured-clonable; a SharedArrayBuffer in it stays shared) goes, under the string k, to every
+   worker this page creates from now on (call it before the threads start). nil."
+  [k v]
+  (aset shared-js k v)
+  nil)
+
+(defn shared-of
+  "What the page shared under k (share!): in a worker, what its start carried; on the page, its own; else nil."
+  [k]
+  (if-let [d (init-data)]
+    (when-let [s (.-shared d)] (aget s k))
+    (aget shared-js k)))
 
 (defn error-data [e]
   {:class (cond (instance? ExceptionInfo e) "cljs.core/ExceptionInfo"
@@ -273,7 +291,7 @@
           (fn [e]
             ;; the backstop: an error the worker did not report, to its starter
             (when
-              (zero? (js/Atomics.compareExchange ctl (reported-word id) 0 1))
+             (zero? (js/Atomics.compareExchange ctl (reported-word id) 0 1))
               (send! starter
                      {:eve.thread/exit id
                       :reason {:class "error"
@@ -291,7 +309,8 @@
                                   :kernel (kernel-url)
                                   :entry entry
                                   :boot boot
-                                  :started started}})))
+                                  :started started
+                                  :shared shared-js}})))
 
 (defn- pump!
   "On the page: create every worker the spawn ring asks for, then wait (without blocking) for the next request."
