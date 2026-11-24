@@ -1210,7 +1210,9 @@
 (defn- jlog-open!
   "The jlog side of opening a domain. A creator — whose root went down under HOLD_RECOVERING (init-domain-root!) —
    lays the log down with its first ANCHOR, claims its slot, then lets the hold go. A joiner takes the recovery hold: a
-   live domain is joined as it stands; a domain no process holds is recovered (jlog-recover!). Answers {:log
+   live domain is joined as it stands; a domain no process holds is recovered (jlog-recover!) — and so is one whose
+   root this open read fresh from storage (eve.mem/fresh-region?: a browser's OPFS file no live worker holds), whatever
+   its heartbeats say. Answers {:log
    :slot-idx}."
   [root-r sio base-path create? opts]
   (if create?
@@ -1222,7 +1224,9 @@
         (mem/-store-i32! root-r d/ROOT_HOLD_OFFSET 0))
       {:log log :slot-idx slot-idx})
     (let [res (with-recovery-hold* root-r
-                (fn [] (if (domain-live? root-r) ::live (jlog-recover! root-r sio base-path opts))))]
+                (fn [] (if (and (not (mem/fresh-region? root-r)) (domain-live? root-r))
+                         ::live
+                         (jlog-recover! root-r sio base-path opts))))]
       (if (= ::live res)
         (let [path (jlog-path base-path)
               _ (when-not (proc/file-exists? path)
@@ -1238,8 +1242,10 @@
   "Create (create? true) or join the mmap domain at base-path. Returns the
    domain state. The process's slabs are this domain's from here on (CLJS
    slabs are module state: one mmap domain per process). A creator writes the
-   slabs, then the root, its magic last; a joiner opens the slabs only once
-   the magic is there."
+   slabs, then the root, its magic last; on storage no process maps (a fresh
+   root: eve.mem/fresh-region?, a browser's OPFS) it forces them, since a page
+   may die before its first commit's force, and a domain whose root never
+   reached the disk could not be opened again; a joiner opens the slabs only once the magic is there."
   [base-path {:keys [capacities lustre? create?] :as opts}]
   (when create? (proc/ensure-parent-dir! base-path))
   (let [root-r (region/open-mmap-region (str base-path ".root") ROOT_BYTES
@@ -1251,6 +1257,10 @@
         jlog? (:journal? opts)
         _ (when create? (init-domain-root! root-r (if jlog? HOLD_RECOVERING 0)))
         jl (when jlog? (jlog-open! root-r sio base-path create? opts))
+        _ (when (and create? (mem/fresh-region? root-r))
+            (alloc/sync-sio! sio)
+            (mem/sync-region! rmap-r)
+            (mem/sync-region! root-r))
         journal  (when jl
                    {:log     (:log jl)
                     :limit   (or (:journal-batch opts) 1)

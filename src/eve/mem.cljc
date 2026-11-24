@@ -143,6 +143,20 @@
    (when (and r (satisfies? ISyncableRegion r))
      (-sync-range! r byte-off len))))
 
+;; A region opened from storage no process maps: a browser's OPFS file (eve.region.opfs), whose bytes live in this
+;; page's memory only once its io worker reads them in — a page that died took its memory, and its workers, with it.
+;; The worker slots such a region's root carries are a dead page's however fresh their heartbeats: an opener of a
+;; fresh root recovers the domain (eve.atom's jlog-open!) instead of joining it. A mapped file (the page cache every
+;; process maps) is never fresh: its liveness is its heartbeats'.
+(defprotocol IFreshRegion
+  (-fresh? [r]
+    "true when this open read r's bytes in from storage: no live process holds them."))
+
+(defn fresh-region?
+  "true when r was opened fresh from storage (IFreshRegion); false for every other region."
+  [r]
+  (boolean (and r (satisfies? IFreshRegion r) (-fresh? r))))
+
 (defprotocol IHostAtomics
   "What a host's region can promise about its read-modify-write ops."
   (-atomic-rmw? [r]
