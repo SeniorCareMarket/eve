@@ -270,6 +270,8 @@
                                      "bb" "test:browser"))}
   test:browser:dom-demo {:doc "eve.dom's acceptance demo in headless Chromium: reagami + canvas-confetti in main's worker"
                          :task (shell {:extra-env {"EVE_BROWSER_SUITE" "dom-demo"}} "bb" "test:browser")}
+  perf:browser:dom {:doc "eve.dom's perf cells (px-*) by engine and transport: scripts/dom-perf.sh (CELLS, ENGINES, TRANSPORTS, REPS, OUT, EVE_BENCH_LOCK)"
+                    :task (shell "scripts/dom-perf.sh")}
   test:clje {:doc "The shared (.cljc) tests on clojerl (eve's NIF is built on first load into adapters/core/beam/target/clje/)"
              :task (apply shell "clojerl" (concat (mapcat (fn [r] ["-pa" r]) (roots :clje "test" "apps/network-atoms/test" "apps/aegis/test"))
                                                   ["-m" "eve.runner.clje-main" "test"] *command-line-args*))}}}

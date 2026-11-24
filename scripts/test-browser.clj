@@ -15,7 +15,9 @@
 ;;   eve.runner.opfs-browser-main: the page mounts the OPFS pool first). EVE_BROWSER_SUITE=dom (bb test:browser:dom):
 ;;   eve.dom's conformance instead (the :eve-dom-browser build, eve.runner.dom-browser-main: the program's main a
 ;;   worker driving the page's DOM); EVE_BROWSER_SUITE=dom-demo (bb test:browser:dom-demo): its acceptance demo,
-;;   reagami + canvas-confetti.
+;;   reagami + canvas-confetti; EVE_BROWSER_SUITE=dom-perf: one of its perf cells (the :eve-dom-perf build,
+;;   eve.dom-demo.perf; the page's ?eve-dom-perf=<cell>; scripts/dom-perf.sh runs them). EVE_BROWSER_NO_BUILD=1 reuses
+;;   an already built page. The browser profile goes under TMPDIR when it is set.
 ;;   EVE_BROWSER=firefox|webkit: that engine instead of Chromium, through Playwright (scripts/browser-open.cjs; NODE_PATH
 ;;   to find playwright, PLAYWRIGHT_BROWSERS_PATH for its browsers). For eve.dom's transports: EVE_BROWSER_COI=0 serves
 ;;   the page without COOP/COEP (it must isolate itself through eve-sw.js), EVE_BROWSER_QUERY is the page URL's query
@@ -30,12 +32,14 @@
 (def perf? (some? (System/getenv "EVE_BROWSER_PERF")))
 (def opfs? (and (not perf?) (some? (System/getenv "EVE_BROWSER_OPFS"))))
 (def suite (System/getenv "EVE_BROWSER_SUITE"))
-(def dom? (contains? #{"dom" "dom-demo"} suite))
+(def dom? (contains? #{"dom" "dom-demo" "dom-perf"} suite))
+(def demo-assets? (contains? #{"dom-demo" "dom-perf"} suite))
 (def build (cond perf? "eve-perf-browser" opfs? "eve-opfs-browser" (= "dom" suite) "eve-dom-browser"
-                 (= "dom-demo" suite) "eve-dom-demo" :else "eve-thread-browser"))
+                 (= "dom-demo" suite) "eve-dom-demo" (= "dom-perf" suite) "eve-dom-perf" :else "eve-thread-browser"))
 (def out (str eve (cond perf? "/target/perf-browser" opfs? "/target/opfs-browser" (= "dom" suite) "/target/dom-browser"
-                        (= "dom-demo" suite) "/target/dom-demo" :else "/target/thread-browser")))
-(def aliases (if (= "dom-demo" suite) "-M:browser-test:dom-demo" "-M:browser-test"))
+                        (= "dom-demo" suite) "/target/dom-demo" (= "dom-perf" suite) "/target/dom-perf"
+                        :else "/target/thread-browser")))
+(def aliases (if demo-assets? "-M:browser-test:dom-demo" "-M:browser-test"))
 (def public (str out "/public"))
 
 (defn- step [& xs] (apply println "test:browser:" xs) (flush))
@@ -48,20 +52,23 @@
 (when dom?
   ;; eve's service worker at the site root: isolation headers for an unisolated page, and eve.dom's relay
   (fs/copy (str eve "/adapters/sw/browser/eve-sw.js") (str public "/eve-sw.js") {:replace-existing true}))
-(when (= "dom-demo" suite)
+(when demo-assets?
   ;; the demo's third-party scripts (unmodified, licences beside them), loaded by its main worker
   (fs/copy-tree (str eve "/adapters/dom/browser/demo/public") public {:replace-existing true}))
 
 ;; the OPFS page boots through eve's service worker (eve.opfs.boot: it isolates a page served without COOP/COEP)
 (when opfs? (fs/copy (str eve "/adapters/sw/browser/eve-sw.js") (str public "/eve-sw.js") {:replace-existing true}))
 
-(step (str "building the page (shadow-cljs release " build ", :simple)"))
-(let [r (p/shell {:dir eve :continue true :out :string :err :string}
-                 "clojure" aliases "-m" "shadow.cljs.devtools.cli" "release" build)]
-  (when-not (zero? (:exit r))
-    (println (:out r) (:err r))
-    (step "build FAILED")
-    (System/exit 1)))
+(if (and (System/getenv "EVE_BROWSER_NO_BUILD") (fs/exists? (str public "/js/main.js")))
+  (step (str "reusing the built page (EVE_BROWSER_NO_BUILD): " public "/js/main.js"))
+  (step (str "building the page (shadow-cljs release " build ", :simple)")))
+(when-not (and (System/getenv "EVE_BROWSER_NO_BUILD") (fs/exists? (str public "/js/main.js")))
+  (let [r (p/shell {:dir eve :continue true :out :string :err :string}
+                   "clojure" aliases "-m" "shadow.cljs.devtools.cli" "release" build)]
+    (when-not (zero? (:exit r))
+      (println (:out r) (:err r))
+      (step "build FAILED")
+      (System/exit 1))))
 
 (def result (promise))
 
@@ -111,7 +118,8 @@
 
 (def stop (http/run-server serve {:ip "127.0.0.1" :port 0 :legacy-return-value? false}))
 (def port (http/server-port stop))
-(def profile (str (fs/create-temp-dir {:prefix "eve-chrome-"})))
+(def profile (str (fs/create-temp-dir (cond-> {:prefix "eve-chrome-"}
+                                        (System/getenv "TMPDIR") (assoc :dir (System/getenv "TMPDIR"))))))
 (step (str "serving on 127.0.0.1:" port "; opening headless " (or (System/getenv "EVE_BROWSER") "Chromium")))
 (def page-url (str "http://127.0.0.1:" port "/index.html" (some->> (System/getenv "EVE_BROWSER_QUERY") (str "?"))))
 (def engine (System/getenv "EVE_BROWSER"))
@@ -122,12 +130,16 @@
                "node" "scripts/browser-open.cjs" engine page-url
                ;; the OPFS page needs a persistent profile (WebKit has no OPFS in an ephemeral context)
                (if opfs? profile ""))
-    (p/process {:out :string :err :string}
-               (or (find-chrome)
-                   (throw (ex-info "test:browser: no Chromium found — set EVE_CHROME or run: npx playwright install chromium" {})))
-               "--headless=new" "--no-sandbox" "--disable-gpu" "--no-proxy-server" "--no-first-run"
-               "--enable-logging=stderr" "--v=0"
-               (str "--user-data-dir=" profile) page-url)))
+    (apply p/process {:out :string :err :string}
+           (or (find-chrome)
+               (throw (ex-info "test:browser: no Chromium found — set EVE_CHROME or run: npx playwright install chromium" {})))
+           (concat ["--headless=new" "--no-sandbox" "--disable-gpu" "--no-proxy-server" "--no-first-run"
+                    "--enable-logging=stderr" "--v=0"]
+                   ;; dom-perf only (no other suite's launch changes): a headless page counts as backgrounded and its
+                   ;; renderer is throttled (Playwright passes these too); without them a long run of the service-worker
+                   ;; relay's synchronous XHRs fails after ~500 with a NetworkError in Chrome 156
+                   (when (= "dom-perf" suite) ["--disable-background-timer-throttling" "--disable-renderer-backgrounding"])
+                   [(str "--user-data-dir=" profile) page-url]))))
 
 (def timeout-s (parse-long (or (System/getenv "EVE_BROWSER_TIMEOUT_S") "300")))
 (def got (deref result (* 1000 timeout-s) nil))

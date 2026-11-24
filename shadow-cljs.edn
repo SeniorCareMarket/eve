@@ -108,6 +108,14 @@
    :modules {:main {:init-fn eve.dom-demo.main/init}}
    :compiler-options {:optimizations :simple :output-wrapper false}}
 
+  ;; eve.dom's perf cells (scripts/dom-perf.sh: bb test:browser with EVE_BROWSER_SUITE=dom-perf), one cell a page load
+  :eve-dom-perf
+  {:target :browser
+   :output-dir "target/dom-perf/public/js"
+   :asset-path "/js"
+   :modules {:main {:init-fn eve.dom-demo.perf/init}}
+   :compiler-options {:optimizations :simple :output-wrapper false}}
+
   ;; eve's performance suite in a browser (bb test:browser with EVE_BROWSER_PERF=1): the same route as the
   ;; conformance page, a page of its own (the suite loads eve.alpha, which readies a module slab in every worker)
   :eve-perf-browser
