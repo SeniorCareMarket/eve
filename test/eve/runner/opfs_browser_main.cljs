@@ -2,7 +2,8 @@
   "eve's OPFS disk tier in a browser (EVE_BROWSER_OPFS=1 bb test:browser builds this into a page): the page mounts
    the OPFS pool (eve.opfs.mount/mount!) before its threads start, then runs the suite in a worker, as the thread
    conformance page does; the result is POSTed to /result (a mount that fails is the result)."
-  (:require [cljs.reader :as reader]
+  (:require [eve.runner.hang-catcher]
+            [cljs.reader :as reader]
             [cljs.test :as t]
             [eve.atom :as atom]
             [eve.opfs :as opfs]

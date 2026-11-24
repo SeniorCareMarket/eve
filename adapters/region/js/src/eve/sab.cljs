@@ -6,6 +6,7 @@
   (:require [eve.atom :as a]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
+            [eve.deftype-proto.wasm :as wasm]
             [eve.mem :as mem]
             [eve.process-slab :as ps]
             [eve.wasm-mem :as wasm-mem]))
@@ -83,6 +84,26 @@
   (a/register-notify-listener!
    (fn [ds _slot _old _new] (signal-watchers! ds))))
 
+(def ^:private wk-tick-ms 20)
+
+(defn- wk-wait
+  "In a WebKit dedicated worker, waitAsync's promise r and a tick on this worker's own run loop every wk-tick-ms,
+   settling with \"ok\" once word idx of ia has moved from seen. WebKit can lose a waitAsync wake-up there (WebKit
+   PR 77821, bugs.webkit.org 325822: WorkerDedicatedRunLoop::runInMode reads its pending timers before it registers
+   for timer notifications), leaving the promise pending until some unrelated event wakes the worker. Elsewhere, r."
+  [^js r ia idx seen]
+  (if (and (wasm/webkit?) (exists? js/DedicatedWorkerGlobalScope))
+    (js/Promise.
+     (fn [ok _]
+       (let [t (atom nil)
+             tick (fn tick []
+                    (if (not= seen (js/Atomics.load ia idx))
+                      (ok "ok")
+                      (reset! t (js/setTimeout tick wk-tick-ms))))]
+         (.then r (fn [v] (js/clearTimeout @t) (ok v)))
+         (reset! t (js/setTimeout tick wk-tick-ms)))))
+    r))
+
 (defn wait-for-change
   "A promise for the domain's next change: Atomics.waitAsync on the
    root epoch word — resolves :ok when a swap bumps it, :not-equal
@@ -98,5 +119,5 @@
             seen (js/Atomics.load ia idx)
             r (js/Atomics.waitAsync ia idx seen)]
         (if (.-async r)
-          (.then (.-value r) (fn [v] (keyword v)))
+          (.then (wk-wait (.-value r) ia idx seen) (fn [v] (keyword v)))
           (js/Promise.resolve (keyword (.-value r))))))))

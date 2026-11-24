@@ -43,6 +43,35 @@ const calls = new Map();        // a follower's call id -> resolve(bytes)
 const queue = [];               // the owner's calls not yet served: {from, id, bytes}
 let serving = null;             // the owner's call in the svc block
 const freeSlots = [];           // slots CLOSE_ALL let go, reused before fresh ones
+
+// waitWord: Atomics.waitAsync's promise, or null when it settled at once (the word had moved). WebKit's dedicated
+// workers can lose a waitAsync wake-up (WebKit PR 77821, bugs.webkit.org 325822, open as of 2026-11):
+// WorkerDedicatedRunLoop::runInMode reads its pending timers before it registers for timer notifications, so a notify
+// from another thread in between is seen by neither, and the promise (its timeout too) stays pending until some
+// unrelated event wakes the worker. In WebKit, waitWord also ticks a timer on this worker's own run loop every
+// WK_TICK_MS: it settles once the word has moved or the timeout has passed. A delivered notify settles at once, as on
+// every other engine.
+const WK_TICK_MS = 20;
+const webkitWorker = (() => {
+  const ua = (self.navigator && self.navigator.userAgent) || '';
+  return /AppleWebKit\//.test(ua) && !/Chrome\/|Chromium\//.test(ua);
+})();
+function waitWord(ia, i, seen, ms) {
+  const r = Atomics.waitAsync(ia, i, seen, ms);
+  if (!r.async) return null;
+  if (!webkitWorker) return r.value;
+  return new Promise((ok) => {
+    const t0 = Date.now();
+    let t;
+    const tick = () => {
+      if (Atomics.load(ia, i) !== seen) ok('ok');
+      else if (ms !== undefined && Date.now() - t0 >= ms) ok('timed-out');
+      else t = setTimeout(tick, WK_TICK_MS);
+    };
+    r.value.then((v) => { clearTimeout(t); ok(v); });
+    t = setTimeout(tick, WK_TICK_MS);
+  });
+}
 const byPath = new Map();       // path -> {slot, handle}
 const bySlot = [];              // slot -> {path, handle, hashes: Int32Array, 2 per page}
 const bounce = new Uint8Array(BOUNCE);
@@ -425,8 +454,8 @@ function awaitReply(req) {
   const cur = Atomics.load(svc, S_RESP);
   if (cur === req) return done();
   if (typeof Atomics.waitAsync === 'function') {
-    const r = Atomics.waitAsync(svc, S_RESP, cur);
-    if (r.async) r.value.then(() => awaitReply(req)); else awaitReply(req);
+    const w = waitWord(svc, S_RESP, cur);
+    if (w) w.then(() => awaitReply(req)); else awaitReply(req);
   } else setTimeout(() => awaitReply(req), 1);
 }
 
@@ -468,8 +497,8 @@ async function loop() {
     const db = Atomics.load(ctl, DOORBELL);
     if (db === seen) {
       if (waitAsync) {
-        const r = Atomics.waitAsync(ctl, DOORBELL, seen, 10000);
-        if (r.async) await r.value;
+        const w = waitWord(ctl, DOORBELL, seen, 10000);
+        if (w) await w;
       } else if (Atomics.wait(ctl, DOORBELL, seen, 20) === 'timed-out') {
         await new Promise(r => setTimeout(r, 0));
       }

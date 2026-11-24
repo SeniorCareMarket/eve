@@ -153,9 +153,24 @@ cell: the browser row's `disk-swap-counter` stays n/a there, since that page has
   only (user agent `AppleWebKit/` without `Chrome/`), `eve.deftype-proto.wasm/slab-capacity` caps a kernel's slabs at
   64/64/32/32/32/32 MiB plus a 64 MiB coalesce region, about 363 MiB per kernel. The largest growth measured across the
   browser and perf suites was 32 MiB in class 0. `eve.opfs.mount/make-pool` reserves its share at once, with no probe.
-  An explicit `:capacities` still wins; Chromium and Firefox are unchanged. A rarer WebKit stall remains (see
-  BASELINE §22): a fresh worker that never sends its next file request. WebKit also needs a persistent profile for
+  An explicit `:capacities` still wins; Chromium and Firefox are unchanged. WebKit also needs a persistent profile for
   OPFS (an ephemeral context fails with UnknownError); the runner passes one.
+- **WebKit can lose an `Atomics.waitAsync` wake-up in a dedicated worker.** This is WebKit PR 77821 /
+  bugs.webkit.org 325822, still open in 2026-11. `WorkerDedicatedRunLoop::runInMode` reads its pending timers before
+  it registers for timer notifications. A notify from another thread in between is seen by neither, so the promise
+  (its timeout too) stays pending until some unrelated event wakes the worker.
+  - Standalone repro, with no Eve code: a producer worker does add plus notify, and a consumer worker waits only
+    through `waitAsync`. Measured 2026-11-24 in Playwright WebKit 2388, all 5 runs stalled within 2k–20k round trips:
+    the consumer was registered on the old value, the word had moved and been notified, and it was still pending
+    past its own 10 s timeout. Chromium 159 and Firefox 159 had 0 stalls in 500k each.
+  - In Eve it hung the OPFS io worker. The test page's hang catcher (`eve.runner.hang-catcher`) dumped the doorbell
+    at n+1 with the io worker's waiter still registered on n, and the svc reply at n+1 with the owner's waiter on n.
+    The cost was a request never served: a 300 s suite timeout, or a follower's EveNoOwner.
+  - Eve's own order is correct on every engine: each waiter passes the value it just compared, and each writer
+    stores and then notifies.
+  - The fix, in WebKit dedicated workers only: the io worker's waits (`opfs_io.js` `waitWord`) and
+    `eve.sab/wait-for-change` also tick a 20 ms timer on the worker's own run loop. A tick settles the wait once the
+    word has moved or its timeout has passed. Chromium and Firefox keep plain `waitAsync`.
 - **Firefox stalls a new service worker controller's first main-thread synchronous XHR**. Measured in Firefox 159: on a
   page eve-sw.js had just taken control of, the page's first sync XHR, to any URL, waited ~60 s and then failed with
   a NetworkError. Later ones took milliseconds, and so did a worker's. `eve.thread-host` therefore reads the build's
