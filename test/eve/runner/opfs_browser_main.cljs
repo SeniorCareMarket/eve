@@ -7,6 +7,7 @@
             [eve.runner.opfs-tabs :as tabs]
             [eve.thread-host :as h]
             [eve.opfs-browser-test]
+            [eve.opfs-relay-test]
             [eve.region-opfs-test]))
 
 (def ^:private report-to (atom nil))
@@ -34,7 +35,7 @@
   "A worker's entry: the OPFS suites, the summary sent to the page."
   [boot]
   (reset! report-to (:reply boot))
-  (t/run-tests 'eve.region-opfs-test 'eve.opfs-browser-test))
+  (t/run-tests 'eve.region-opfs-test 'eve.opfs-browser-test 'eve.opfs-relay-test))
 
 (defn- main-rows []
   (let [[ok? e] (h/attempt (fn [] (h/receive! 10)))]
@@ -71,6 +72,9 @@
   (let [t0 (js/Date.now)
         by (if (.getItem js/sessionStorage "eve.opfs/coi-reload") :sw :headers)]
     (-> (boot/boot! {:opfs {:root "eve-opfs-test"}})
+        ;; eve's service worker controls the page before the suite's workers start (the relay's tests): registered
+        ;; here when the headers isolated the page
+        (.then (fn [r] (.then (tabs/controlled!) (fn [_] r))))
         (.then (fn [{:keys [pool]}]
                  (start! (assoc (main-rows) :mounted (some? pool)) t0 (.-mode ^js pool) by))
                (fn [e] (post! {:op :mount-failed :message (str e) :main {:mounted false}}))))))

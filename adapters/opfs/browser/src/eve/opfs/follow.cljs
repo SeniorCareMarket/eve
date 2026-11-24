@@ -18,6 +18,7 @@
   (:require
    [eve.atom :as atom]
    [eve.opfs :as opfs]
+   [eve.opfs.relay :as relay]
    [eve.thread-host :as h]
    [eve.wire :as wire]))
 
@@ -92,12 +93,32 @@
   []
   (hash [(opfs/tab-id) (h/self)]))
 
+(defonce ^:private via-relay (atom false))
+
+(defn use-relay!
+  "This worker's follower atoms call the owner through eve's service worker relay (W9: eve.opfs.relay; the page
+   not isolated, or a test) when on? (default true), else through the tab's io worker and the channel."
+  ([] (use-relay! true))
+  ([on?] (reset! via-relay (boolean on?)) nil))
+
+(defn- send! [^js req]
+  (if @via-relay
+    (let [^js r (relay/call! (relay/host-for (opfs/root)) req)]
+      (if (zero? (.-length r))
+        (throw (ex-info "eve.opfs.follow: the relay's host does not own the files" {::no-owner true}))
+        r))
+    (opfs/call-owner! req)))
+
+(defn- no-owner? [e]
+  (let [d (ex-data e)]
+    (or (opfs/no-owner? e) (::no-owner d) (= :relay-timeout (:eve.opfs/refused d)))))
+
 (defn- call! [m]
   (let [deadline (+ (js/Date.now) 30000)]
     (loop [wait 10]
-      (let [[ok? r] (try [true (wire/decode (opfs/call-owner! (wire/encode m)))]
+      (let [[ok? r] (try [true (wire/decode (send! (wire/encode m)))]
                          (catch :default e
-                           (if (and (opfs/no-owner? e) (< (js/Date.now) deadline) (not (opfs/owner?)))
+                           (if (and (no-owner? e) (< (js/Date.now) deadline) (not (opfs/owner?)))
                              [false nil]
                              (throw e))))]
         (cond ok? (if (:error r) (throw (ex-info (str "eve.opfs.follow: the owner refused: " (:error r)) m)) r)

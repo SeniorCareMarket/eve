@@ -7,6 +7,7 @@
   (:require
    [eve.opfs :as opfs]
    [eve.opfs.follow]
+   [eve.opfs.relay :as relay]
    [eve.thread-host :as h]
    [shadow.resource :as rc]))
 
@@ -71,10 +72,39 @@
   (when (compare-and-set! server nil :starting)
     (reset! server (first (h/start-threads! 1 'eve.opfs.follow/serve! {} {})))))
 
+(defonce ^:private relay-host (atom nil))
+
+(defn serve-relay!
+  "The owner tab's host on eve's service worker relay (W9: eve.opfs.relay), once, when the service worker controls
+   the page: its follower calls go to the io worker, as a channel's do (the tab's follower server answers them).
+   mount! starts it; a page whose service worker took control later calls it again. true when it serves."
+  []
+  (let [^js p (opfs/pool-of)
+        ^js io (.-__eve_opfs_io js/globalThis)]
+    (when (and p io (= "owner" (.-role p)) (.-mounted p) (nil? @relay-host)
+               (some-> (.-serviceWorker js/navigator) .-controller))
+      (let [pending (atom {})
+            n (atom 0)]
+        (.addEventListener io "message"
+                           (fn [^js e]
+                             (when-let [^js r (some-> e .-data .-eveRelayReply)]
+                               (when-let [f (get @pending (.-id r))]
+                                 (swap! pending dissoc (.-id r))
+                                 (f (or (.-bytes r) (js/Uint8Array. 0)))))))
+        (reset! relay-host
+                (relay/serve! (relay/host-for (.-root p)) (.-term p)
+                              (fn [req]
+                                (js/Promise.
+                                 (fn [resolve _]
+                                   (let [id (swap! n inc)]
+                                     (swap! pending assoc id resolve)
+                                     (.postMessage io #js {:eveRelayCall #js {:id id :bytes req}})))))))))
+    (some? @relay-host)))
+
 (defn- tell! [^js p role term]
   (set! (.-role p) role)
   (set! (.-term p) term)
-  (when (and (= "owner" role) (.-mounted p)) (serve-followers!))   ; before the mount, ready starts it
+  (when (and (= "owner" role) (.-mounted p)) (serve-followers!) (serve-relay!))   ; before the mount, ready starts them
   (doseq [f @listeners] (f role term)))
 
 (defn mount!
@@ -89,6 +119,7 @@
          w    (js/Worker. url)
          tab  (str (js/Date.now) "-" (.toString (rand-int 0x7fffffff) 36))]
      (set! (.-tab p) tab)
+     (set! (.-root p) (:root opts))
      (js/Promise.
       (fn [resolve reject]
         (set! (.-onmessage w)
@@ -102,7 +133,9 @@
                     (opfs/use-pool! p)
                     (h/share! "eve.opfs" p)
                     (set! (.-mounted p) true)
-                    (when (= "owner" (.-role p)) (serve-followers!))
+                    (when (= "owner" (.-role p)) (serve-followers!) (serve-relay!))
+                    (when-let [sw (.-serviceWorker js/navigator)]
+                      (.addEventListener sw "controllerchange" (fn [_] (serve-relay!))))
                     (resolve p))
                   (when (.-eveOpfsRole d) (tell! p (.-eveOpfsRole d) (.-term d)))
                   (when (.-eveOpfsOwner d) (tell! p "follower" (.-term d)))

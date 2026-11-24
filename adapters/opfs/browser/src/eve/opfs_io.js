@@ -25,7 +25,8 @@
 // Followers (W8): a follower tab's worker calls the owner (FOLLOW_CALL: request bytes in the string area, the reply
 // there after); this worker posts {eveCall} on the channel and answers when the owner's {eveReply} comes (or EveNoOwner
 // after CALL_MS: no owner served it). The owner's io worker queues the calls and hands them one at a time to its
-// tab's follower server (eve.opfs.follow, an eve thread) through the pool's svc block: S_REQ goes up with a call in
+// tab's follower server (eve.opfs.follow, an eve thread) through the pool's svc block (and so, posted by the page, a
+// call from the service worker's relay, W9: eve.opfs.relay): S_REQ goes up with a call in
 // it, S_RESP is set to it with the reply. An owner's file write (a commit's) is announced {eveCommit}, at most once
 // a turn: a follower counts them in COMMITS, and a cached value read before the count moved is stale.
 'use strict';
@@ -331,11 +332,18 @@ async function followCall() {
   ctl[NSTR] = reply.length; ctl[R0] = reply.length;
 }
 
+// A call's reply: on the channel to the tab that called, or (a call the page took from the service worker's relay,
+// eve.opfs.relay) to the page
+function replyTo(c, bytes) {
+  if (c.relay !== undefined) self.postMessage({eveRelayReply: {id: c.relay, bytes}});
+  else channel.postMessage({eveReply: {to: c.from, id: c.id, bytes}});
+}
+
 // The owner: the next queued call into the svc block, its reply posted back when the server sets S_RESP
 function pump() {
   if (serving || queue.length === 0 || !svc) return;
   const c = queue.shift();
-  if (c.bytes.length > svcBytes.length - 4 * S_BYTES) { channel.postMessage({eveReply: {to: c.from, id: c.id, bytes: null}}); return pump(); }
+  if (c.bytes.length > svcBytes.length - 4 * S_BYTES) { replyTo(c, null); return pump(); }
   serving = c;
   svcBytes.set(c.bytes, 4 * S_BYTES);
   Atomics.store(svc, S_LEN, c.bytes.length);
@@ -347,7 +355,7 @@ function awaitReply(req) {
   const done = () => {
     const n = Atomics.load(svc, S_LEN);
     const bytes = svcBytes.slice(4 * S_BYTES, 4 * S_BYTES + n);
-    channel.postMessage({eveReply: {to: serving.from, id: serving.id, bytes}});
+    replyTo(serving, bytes);
     serving = null;
     pump();
   };
@@ -416,7 +424,13 @@ async function loop() {
 self.onmessage = async (ev) => {
   const d = ev.data;
   if (!d || !d.eveOpfsBoot) return;
-  self.onmessage = null;
+  // after the boot: calls the page took from the service worker's relay (W9), served as a channel's are
+  self.onmessage = (m) => {
+    const c = m.data && m.data.eveRelayCall;
+    if (!c) return;
+    if (Atomics.load(ctl, ROLE) === OWNER) { queue.push({relay: c.id, bytes: c.bytes}); pump(); }
+    else self.postMessage({eveRelayReply: {id: c.id, bytes: null}});
+  };
   try {
     ctl = new Int32Array(d.ctl); ctlBytes = new Uint8Array(d.ctl);
     argsCap = d.argsWords; strBase = 4 * (ARGS + argsCap);

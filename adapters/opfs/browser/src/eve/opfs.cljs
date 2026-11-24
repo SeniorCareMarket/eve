@@ -197,6 +197,11 @@
   []
   (some-> (pool-of) .-tab))
 
+(defn root
+  "The OPFS root this tab's pool is over (eve.opfs.mount/mount!'s :root), or nil with no pool."
+  []
+  (some-> (pool-of) .-root))
+
 (defn svc-block
   "The owner's svc block (eve/opfs_io.js's S_ words): the follower server's (eve.opfs.follow)."
   []

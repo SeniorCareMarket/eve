@@ -6,7 +6,9 @@
    recovers the domain and finds every commit A made; C hears B's term. Followers (W8): B and C swap through A
    before it goes (25 each, racing), C reads the total, and after the takeover C's swaps go to B. Exactly once
    (W8b): a compare-and-set A applied, resent to B after the takeover with the same request id, is answered as
-   applied (B read the id from A's journal), not applied again or refused. The page's half (takeover!) answers a map of
+   applied (B read the id from A's journal), not applied again or refused. The relay (W9): C's follower atom then
+   swaps through eve's service worker (eve.opfs.relay) to B, where this browser relays a worker's synchronous XHR
+   (where it does not, the step says so). The page's half (takeover!) answers a map of
    steps for the result; a tab's half (tab!) runs in the iframe."
   (:require
    [cljs.reader :as reader]
@@ -14,6 +16,7 @@
    [eve.opfs :as opfs]
    [eve.opfs.follow :as follow]
    [eve.opfs.mount :as mount]
+   [eve.opfs.relay :as relay]
    [eve.thread-host :as h]
    [eve.wire :as wire]))
 
@@ -85,6 +88,26 @@
   (let [r (wire/decode (opfs/call-owner! (wire/encode (reader/read-string req))))]
     (h/send! reply {:op :resent :ok (:ok r) :resent (:resent r) :count (:count (:value r))})))
 
+(defn tab-relay
+  "A worker's entry: swap :count up n times through a follower atom over eve's service worker relay, report the last
+   (or that this worker's synchronous XHRs do not reach the service worker)."
+  [{:keys [reply base n]}]
+  (try
+    (if-not (relay/relayed?)
+      (h/send! reply {:op :relayed :relayed false
+                      :ping (try (let [x (js/XMLHttpRequest.)]
+                                   (.open x "GET" "/eve-sw/opfs/ping" false)
+                                   (.send x)
+                                   [(.-status x) (.getAllResponseHeaders x)])
+                                 (catch :default e (str e)))
+                      :location (str (.-href js/location))})
+      (let [_ (follow/use-relay!)
+            a (follow/follower-atom {:id :eve/main :persistent base} nil)
+            end (last (repeatedly n #(swap! a update :count inc)))]
+        (h/send! reply {:op :relayed :relayed true :count (:count end) :owner (opfs/owner?)})))
+    (catch :default e
+      (h/send! reply {:op :relayed :error (str e) :stack (some-> (.-stack e) (subs 0 1500))}))))
+
 ;; ---- a tab (the iframe's page)
 
 (defn- to-parent! [tab m]
@@ -97,7 +120,8 @@
   (-> (mount/mount! {:root root :slots 64 :max-file-bytes (* 64 1024 1024)})
       (.then
        (fn [^js p]
-         (to-parent! tab {:op :ready :role (.-role p) :term (.-term p)})
+         (to-parent! tab {:op :ready :role (.-role p) :term (.-term p)
+                          :controlled (some? (some-> (.-serviceWorker js/navigator) .-controller))})
          (mount/on-role! p (fn [role term] (to-parent! tab {:op :role :role role :term term})))
          (js/setInterval (fn [] (let [m (h/receive! 0)]
                                   (when (and (map? m) (or (:op m) (:eve.thread/exit m))) (to-parent! tab m))))
@@ -112,11 +136,29 @@
                                             :fswap 'eve.runner.opfs-tabs/tab-fswap
                                             :fread 'eve.runner.opfs-tabs/tab-fread
                                             :cas 'eve.runner.opfs-tabs/tab-cas
-                                            :resend 'eve.runner.opfs-tabs/tab-resend)]
+                                            :resend 'eve.runner.opfs-tabs/tab-resend
+                                            :relay 'eve.runner.opfs-tabs/tab-relay)]
                                 (h/start-threads! 1 entry (assoc (dissoc m :cmd) :reply (h/self)) {})))))
        (fn [e] (to-parent! tab {:op :mount-failed :error (str e)})))))
 
 ;; ---- the page
+
+(defn controlled!
+  "A promise, resolved once eve's service worker controls this page (registered here when the page was isolated by
+   its headers: the relay's tabs are frames it then controls)."
+  []
+  (let [sw (.-serviceWorker js/navigator)]
+    (cond
+      (nil? sw) (js/Promise.resolve false)
+      (.-controller sw) (js/Promise.resolve true)
+      :else (-> (.register sw "/eve-sw.js?coi=1" #js {:scope "/"})
+                (.then (fn [_] (.-ready sw)))
+                (.then (fn [_] (if (.-controller sw)
+                                 true
+                                 (js/Promise. (fn [resolve _]
+                                                (.addEventListener sw "controllerchange" (fn [_] (resolve true))
+                                                                   #js {:once true}))))))
+                (.catch (fn [_] false))))))
 
 (defn- frame! [tab root]
   (let [f (.createElement js/document "iframe")]
@@ -158,7 +200,7 @@
         frames (atom {})
         cas-req (atom nil)]
     (.addEventListener js/window "message" listener)
-    (-> (js/Promise.resolve nil)
+    (-> (controlled!)
         (.then (fn [_] (swap! frames assoc "A" (frame! "A" root)) (wait :a-ready "A" :ready 30000)))
         (.then (fn [m] (step! :a-owns (= "owner" (:role m)) m)
                  (send-tab! (@frames "A") {:cmd :commit :base base :n 20})
@@ -198,9 +240,12 @@
         (.then (fn [m] (step! :resend-applied-once (and (:ok m) (:resent m) (= 171 (:count m))) m)
                  (send-tab! (@frames "C") {:cmd :fswap :base base :n 5})
                  (wait :c-retargets "C" :fswapped 60000)))
-        (.then (fn [m] (step! :c-retargets (= 176 (:count m)) m)))
+        (.then (fn [m] (step! :c-retargets (= 176 (:count m)) m)
+                 (send-tab! (@frames "C") {:cmd :relay :base base :n 4})
+                 (wait :c-relay "C" :relayed 60000)))
+        (.then (fn [m] (step! :c-relays (if (false? (:relayed m)) (not (:error m)) (= 180 (:count m))) m)))
         (.catch (fn [e] (step! :error false {:error (str e)})))
         (.then (fn [_]
                  (.removeEventListener js/window "message" listener)
                  (doseq [f (vals @frames)] (.remove f))
-                 {:ok (and (= 13 (count @steps)) (every? second @steps)) :steps @steps})))))
+                 {:ok (and (= 14 (count @steps)) (every? second @steps)) :steps @steps})))))
