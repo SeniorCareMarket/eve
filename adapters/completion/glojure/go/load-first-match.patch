@@ -1,0 +1,15 @@
+--- a/pkg/runtime/rtcompat.go	2026-11-24 15:34:35.503294156 -0500
++++ b/pkg/runtime/rtcompat.go	2026-11-24 15:34:35.503294156 -0500
+@@ -360,10 +360,11 @@
+ 				buf = b
+ 				foundFS = fs
+ 				filename = testFilename
+-				break
++				goto loadFound
+ 			}
+ 		}
+ 	}
++loadFound:
+ 	if filename == "" {
+ 		panic(fmt.Errorf("failed to load %s: not found in load path", scriptBase))
+ 	}

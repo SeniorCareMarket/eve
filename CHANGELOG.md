@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Fixed (glojure): the Go crypto adapter actually loads, and edwards rows are native.** glojure's `RT.Load` walked
+  the whole load path and kept the last matching file, so `adapters/crypto/portable/src/eve/crypto.cljc` overwrote
+  `adapters/crypto/go/src/eve/crypto.glj` (`host.X25519` was ~0.1 ms; `eve.crypto/x25519` was the portable 2.3 s row).
+  `load-first-match.patch` takes the first match, as Clojure does. `ed25519-scalarmult`, `ed25519-mul-add` and
+  `ed25519-map-to-point` are `eveglj/host` (the portable 256-bit walk and RFC 9380 G.2 over `math/big`), held
+  byte-for-byte to the portable oracles. Official `test:glj eve.net.crypto-fast-path-test` is 7/76/0/0 in 300 s (400 s correctness cap);
+  the 180 s per-ns cap still dies in the live portable oracles (`group-rows` 140 s, `map-to-point-row` 74 s).
+
 - **Added (clojerl): the flat handle types, so the flat cone and the clje suite load.** eve.flat.chunk gains
   `deftype-clje`, which realizes a JVM-named deftype body onto clojerl's protocols through eve.types (as every other
   eve type is there), and `:clje` sections for `defseqhandle`, `defmaphandle` and FlatSet; eve.flat.freeze gains
