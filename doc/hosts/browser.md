@@ -61,21 +61,21 @@ worker's batch meanwhile (15.4 s against 5.7 s), so the capstone reads in a work
 
 ### eve.dom (a worker main driving the page's DOM)
 
-Per-op costs of eve.dom's proxies (docs/eve-dom.md has the method), 2026-11-24 04:59–05:15 AM ET, Eve `49f5f8a6`:
-SAB is a cross-origin isolated page, SW the service worker's synchronous-XHR relay on a page that is not.
+Per-op costs of eve.dom's proxies (docs/eve-dom.md has the method), 2026-11-24 05:51–05:53 AM ET, Eve `3a105fc3` plus
+the launcher fix: SAB is a cross-origin isolated page, SW the service worker's synchronous-XHR relay on a page that is
+not.
 
 | cell (target SAB / SW) | Chromium 156 SAB | Chromium SW relay | Firefox SAB | WebKit SAB | WebKit SW relay |
 |---|---:|---:|---:|---:|---:|
-| `px-get-rtt` p50 / p95 (≤ 50 µs / report) | 25 / 110 µs | 1.0 / 1.8 ms | 40 / 100 µs | 20 / 60 µs | 1 / 1 ms |
-| `px-call-rtt` p50 / p95 (≤ 80 µs / report) | 35 / 95 µs | 1.0 / 1.6 ms ¹ | 40 / 120 µs | 40 / 80 µs | 1 / 1 ms |
-| `px-batch-100` p50 / p95 (≤ 0.5 ms / ≤ 1 call) | 0.26 / 0.66 ms | 1.2 / 2.3 ms | 0.40 / 1.06 ms | 0.36 / 1.38 ms | 1 / 2 ms |
-| `px-event-latency` p50 / p95 (≤ 1 ms / ≤ 2 ms) | 30 / 90 µs | 1.0 / 1.4 ms | 60 / 100 µs | 40 / 140 µs | 1 / 1 ms |
-| worker `click()` to handler p50 / p95 | 60 / 195 µs | 1.1 / 1.5 ms | 80 / 180 µs | 60 / 220 µs | 1 / 1 ms |
-| `px-frame-d3` interval p50 / p95 / max, frames over 25 ms (≤ 16 ms / report) | 16.7 / 19.5 / 22.7, 0 | 16.6 / 20.8 / 23.8, 0 | 16.7 / 17.9 / 19.5, 0 | 16.1 / 17.7 / 19.1, 0 | 16 / 18 / 21, 0 |
-| `first-render`: to main's start / rendered / FCP (report) | 193 / 197 / 214 ms | 192 / 205 / 216 ms | 356 / 361 / 377 ms | 287 / 292 / 315 ms | 205 / 216 / 222 ms |
+| `px-get-rtt` p50 / p95 (≤ 50 µs / report) | 25 / 45 µs | 0.9 / 1.5 ms | 40 / 60 µs | 20 / 100 µs | 1 / 2 ms |
+| `px-call-rtt` p50 / p95 (≤ 80 µs / report) | 30 / 70 µs | 0.8 / 1.4 ms | 40 / 140 µs | 40 / 100 µs | 1 / 2 ms |
+| `px-batch-100` p50 / p95 (≤ 0.5 ms / ≤ 1 call) | 0.27 / 1.1 ms | 1.5 / 6 ms | 0.38 / 0.78 ms | 0.40 / 1.06 ms | 1 / 3 ms |
+| `px-event-latency` p50 / p95 (≤ 1 ms / ≤ 2 ms) | 35 / 95 µs | 1.1 / 2.7 ms | 100 / 220 µs | 60 / 340 µs | 1 / 2 ms |
+| worker `click()` to handler p50 / p95 | 55 / 180 µs | 1.2 / 2.8 ms | 140 / 340 µs | 100 / 500 µs | 1 / 3 ms |
+| `px-frame-d3` interval p50 / p95 / max, frames over 25 ms (≤ 16 ms / report) | 16.7 / 18.1 / 19.1, 0 | 16.7 / 17.5 / 19.9, 0 | 16.7 / 19.2 / 19.7, 0 | 16.1 / 18.2 / 20.2, 0 | 16 / 19 / 21, 0 |
+| `first-render`: to main's start / rendered / FCP (report) | 211 / 215 / 228 ms | 241 / 255 / 272 ms | 446 / 457 / 469 ms | 325 / 330 / 338 ms | 236 / 256 / 273 ms |
 
-SW columns are ≤ (coarse clocks on an unisolated page). Firefox's SW relay is refused by design. One Chromium SW
-`px-call-rtt` load of three failed with a NetworkError in the relay's synchronous XHR (see docs/eve-dom.md).
+SW columns are ≤ (coarse clocks on an unisolated page). Firefox's SW relay is refused by design.
 
 ## Disk domains: the OPFS tier
 

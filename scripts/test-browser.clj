@@ -144,10 +144,12 @@
                (throw (ex-info "test:browser: no Chromium found — set EVE_CHROME or run: npx playwright install chromium" {})))
            (concat ["--headless=new" "--no-sandbox" "--disable-gpu" "--no-proxy-server" "--no-first-run"
                     "--enable-logging=stderr" "--v=0"]
-                   ;; dom-perf only (no other suite's launch changes): a headless page counts as backgrounded and its
-                   ;; renderer is throttled (Playwright passes these too); without them a long run of the service-worker
-                   ;; relay's synchronous XHRs fails after ~500 with a NetworkError in Chrome 156
-                   (when (= "dom-perf" suite) ["--disable-background-timer-throttling" "--disable-renderer-backgrounding"])
+                   ;; eve.dom's suites only (no other suite's launch changes): no browser extensions, as Playwright
+                   ;; launches. An extension a machine's policy force-installs sees each of the page's and its workers'
+                   ;; requests; with one (this fleet's Chrome has two), a worker's run of a few hundred back-to-back
+                   ;; synchronous XHRs ends in a NetworkError (the service-worker relay's, or plain network ones alike),
+                   ;; and none fails without it
+                   (when dom? ["--disable-extensions"])
                    [(str "--user-data-dir=" profile) page-url]))))
 
 (def timeout-s (parse-long (or (System/getenv "EVE_BROWSER_TIMEOUT_S") "300")))

@@ -46,29 +46,30 @@ pools before main's worker starts.
 `EVE_BROWSER_COI=0`, `EVE_BROWSER_QUERY=eve-dom-transport=sw`, `EVE_BROWSER_EXPECT=sab|sw` select a transport.
 
 ## Performance
-Measured 2026-11-24 04:59–05:15 AM ET on box J (Linux x86_64), Eve `49f5f8a6` plus this runner, load1 4.2–9.3 (other
-lanes running), BENCH.lock held per cell.
+Measured 2026-11-24 05:51–05:53 AM ET on box J (Linux x86_64), Eve `3a105fc3` plus the launcher fix, load1 8.9 median
+(other lanes running), BENCH.lock held per cell.
 
 | cell (target SAB / SW) | Chromium 156 SAB | Chromium SW relay | Firefox SAB | WebKit SAB | WebKit SW relay |
 |---|---:|---:|---:|---:|---:|
-| `px-get-rtt` p50 / p95 (≤ 50 µs / report) | 25 / 110 µs | 1.0 / 1.8 ms | 40 / 100 µs | 20 / 60 µs | 1 / 1 ms |
-| `px-call-rtt` p50 / p95 (≤ 80 µs / report) | 35 / 95 µs | 1.0 / 1.6 ms ¹ | 40 / 120 µs | 40 / 80 µs | 1 / 1 ms |
-| `px-batch-100` p50 / p95 (≤ 0.5 ms / ≤ 1 call) | 0.26 / 0.66 ms | 1.2 / 2.3 ms | 0.40 / 1.06 ms | 0.36 / 1.38 ms | 1 / 2 ms |
-| `px-event-latency` p50 / p95 (≤ 1 ms / ≤ 2 ms) | 30 / 90 µs | 1.0 / 1.4 ms | 60 / 100 µs | 40 / 140 µs | 1 / 1 ms |
-| worker `click()` to handler p50 / p95 | 60 / 195 µs | 1.1 / 1.5 ms | 80 / 180 µs | 60 / 220 µs | 1 / 1 ms |
-| `px-frame-d3` interval p50 / p95 / max, frames over 25 ms (≤ 16 ms / report) | 16.7 / 19.5 / 22.7, 0 | 16.6 / 20.8 / 23.8, 0 | 16.7 / 17.9 / 19.5, 0 | 16.1 / 17.7 / 19.1, 0 | 16 / 18 / 21, 0 |
-| `first-render`: to main's start / rendered / FCP (report) | 193 / 197 / 214 ms | 192 / 205 / 216 ms | 356 / 361 / 377 ms | 287 / 292 / 315 ms | 205 / 216 / 222 ms |
+| `px-get-rtt` p50 / p95 (≤ 50 µs / report) | 25 / 45 µs | 0.9 / 1.5 ms | 40 / 60 µs | 20 / 100 µs | 1 / 2 ms |
+| `px-call-rtt` p50 / p95 (≤ 80 µs / report) | 30 / 70 µs | 0.8 / 1.4 ms | 40 / 140 µs | 40 / 100 µs | 1 / 2 ms |
+| `px-batch-100` p50 / p95 (≤ 0.5 ms / ≤ 1 call) | 0.27 / 1.1 ms | 1.5 / 6 ms | 0.38 / 0.78 ms | 0.40 / 1.06 ms | 1 / 3 ms |
+| `px-event-latency` p50 / p95 (≤ 1 ms / ≤ 2 ms) | 35 / 95 µs | 1.1 / 2.7 ms | 100 / 220 µs | 60 / 340 µs | 1 / 2 ms |
+| worker `click()` to handler p50 / p95 | 55 / 180 µs | 1.2 / 2.8 ms | 140 / 340 µs | 100 / 500 µs | 1 / 3 ms |
+| `px-frame-d3` interval p50 / p95 / max, frames over 25 ms (≤ 16 ms / report) | 16.7 / 18.1 / 19.1, 0 | 16.7 / 17.5 / 19.9, 0 | 16.7 / 19.2 / 19.7, 0 | 16.1 / 18.2 / 20.2, 0 | 16 / 19 / 21, 0 |
+| `first-render`: to main's start / rendered / FCP (report) | 211 / 215 / 228 ms | 241 / 255 / 272 ms | 446 / 457 / 469 ms | 325 / 330 / 338 ms | 236 / 256 / 273 ms |
 
 Each cell is three page loads (fresh profile each), the median of the loads' own p50/p95; the loop inside a load is
 1,000 reads (get), 500 querySelector calls on a 1,000-div page (call), 50 rounds of 100 `setAttribute` and the read
 that sends them (batch), 200 page-dispatched clicks (event; the page's clock, `performance.timeOrigin` +
 `event.timeStamp`, against the worker's), and 10 d3 transitions of 1 s until all end (frame: the worker's
-animation-frame intervals; 60 Hz is 16.7 ms). Firefox's SW relay is refused by design. The SW pages are not
-cross-origin isolated, so their clocks are coarse (Chromium 0.1 ms, WebKit 1 ms): read those columns as ≤.
-¹ One of the three Chromium SW `px-call-rtt` loads failed: the relay's synchronous XHR `/eve-sw/px/wait` ended in a
-NetworkError after ~460 calls (the median is of the other two). Without `--disable-background-timer-throttling
---disable-renderer-backgrounding` (Playwright's defaults; `dom-perf` passes them to Chrome) it fails after ~500 calls
-every time. WebKit's relay ran every load. In Chromium the first POST after a long synchronous-XHR run can also fail
-once (`:post-tries 2` in the EDN), so the cell page retries it.
+animation-frame intervals, which can't go below the display's 16.7 ms at 60 Hz; the cell counts dropped frames, it does
+not time each frame's work). Firefox's SW relay is refused by design. The SW pages are not cross-origin isolated, so
+their clocks are coarse (Chromium 0.1 ms, WebKit 1 ms): read those columns as ≤.
+
+Chrome is launched with `--disable-extensions` for eve.dom's suites, as Playwright launches it. With an extension a
+machine's policy force-installs (this fleet's Chrome has two), a worker's run of a few hundred back-to-back synchronous
+XHRs ends in a NetworkError, the relay's and plain network ones alike; without extensions 3,000 of 3,000 went through in
+every mode, and 36 of 36 Chromium relay loads of this table's runs were clean.
 
 Run: `bb perf:browser:dom` (`scripts/dom-perf.sh`; `CELLS`, `ENGINES`, `TRANSPORTS`, `REPS`, `OUT`, `EVE_BENCH_LOCK`).

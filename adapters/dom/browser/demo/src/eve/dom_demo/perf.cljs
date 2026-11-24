@@ -138,18 +138,7 @@
   {"px-get-rtt" get-rtt "px-call-rtt" call-rtt "px-batch-100" batch-100 "px-event-latency" event-latency
    "px-frame-d3" frame-d3})
 
-(defn- post!
-  "The result to /result. Under the service-worker relay in Chromium the first POST after a long run of synchronous
-   XHRs can fail (TypeError: Failed to fetch) while a second one goes through, so up to 5 tries, 200 ms apart; the
-   tries it took ride along as :post-tries."
-  ([m] (post! m 1))
-  ([m tries]
-   (let [m' (cond-> m (> tries 1) (update :lines (fn [ls] (mapv #(assoc % :post-tries tries) ls))))]
-     (-> (js/fetch (str (origin) "/result") #js {:method "POST" :body (pr-str m')})
-         (.catch (fn [e]
-                   (if (< tries 5)
-                     (js/Promise. (fn [resolve _] (js/setTimeout #(resolve (post! m (inc tries))) 200)))
-                     (js/Promise.reject e))))))))
+(defn- post! [m] (js/fetch (str (origin) "/result") #js {:method "POST" :body (pr-str m)}))
 
 (defn main
   "main, in the program's main worker."
