@@ -5,7 +5,7 @@
    eve.net.ed25519/well-formed? refuses) — CPython's standard library has neither. Where no libcrypto loads, those are
    eve.net.portable-crypto's; so is XXH3 (CPython has none); random bytes are the process feature's. Bytes are vectors
    of 0..255 in and out; eve/test/eve/net/crypto_test.cljc holds this adapter to the portable code."
-  (:import ctypes ctypes.util hashlib hmac)
+  (:import array ctypes ctypes.util hashlib hmac)
   (:require [eve.host-completion] ; interns +' -' *' on this seat (basilisp.core has none)
             [eve.net.bigops :as bo]
             [eve.net.edwards :as edw]
@@ -14,7 +14,17 @@
             [eve.net.ed25519 :as ed]
             [eve.process :as process]))
 
-(defn- b [bs] (python/bytes (python/list bs)))
+(defn- b
+  "Host bytes as a Python bytes object for hashlib / libcrypto.
+   A vector of 0..255 still goes through list; a host byte array
+   (array('b') or bytearray) is a single buffer copy — packing a
+   1,000-entry map used to list every emit byte on every digest."
+  [bs]
+  (cond
+    (python/isinstance bs python/bytes) bs
+    (python/isinstance bs python/bytearray) (python/bytes bs)
+    (python/isinstance bs array/array) (.tobytes bs)
+    :else (python/bytes (python/list bs))))
 
 (defn sha256 "the 32-byte digest" [bs] (vec (.digest (hashlib/sha256 (b bs)))))
 

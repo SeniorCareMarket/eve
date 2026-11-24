@@ -60,7 +60,8 @@
                                            IReduce IFn IMap ISet IList
                                            -lookup]]]
                 :default []))
-  #?(:clj (:import [java.util Arrays HashMap ArrayList])))
+  #?(:clj (:import [java.util Arrays HashMap ArrayList])
+     :lpy (:import eve_flat_pack_plain)))
 
 #?(:clj (set! *warn-on-reflection* true))
 
@@ -1767,7 +1768,10 @@
                         #?@(:clj [(not (record? v))])
                         (nil? (convert-rep v))))
     v
-    (open (pack-rep (to-rep v)))))
+    #?(:lpy (or (when-let [bs (eve_flat_pack_plain/pack_value v)]
+                  (open bs))
+                (open (pack-rep (to-rep v))))
+       :default (open (pack-rep (to-rep v))))))
 
 (defn pack-all
   "Values packed into chunks of at most 65,535 bytes: a vector of chunk
@@ -2513,6 +2517,10 @@
         ;; vector of 0..255, read here through fio
         (crypto/sha256 #?(:jank (byte-vec bs) :glj (byte-vec bs) :lg (byte-vec bs)
                           :bb bs :clj bs
+                          ;; host bytes (array('b') / bytearray) go straight
+                          ;; to hashlib; byte-vec + python/list of every byte
+                          ;; was a second multi-ms walk on every pack
+                          :lpy bs
                           :cljs (if (or (vector? bs) (instance? js/Uint8Array bs)) bs (byte-vec bs))
                           :default (byte-vec bs)))))
 
