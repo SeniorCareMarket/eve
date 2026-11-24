@@ -9,12 +9,16 @@
    follower retries. Values travel as eve.wire bytes. When the follower's tab takes the files over (eve.opfs/owner?)
    the atom is the tab's own persistent atom from then on: the mode flip.
 
-   A request id the owner applied answers the same reply when sent again (a follower's resend after a lost reply).
-   The owner keeps those replies in its memory: a resend that outlives the owner's tab is not deduplicated (the
-   spec's request id in the jlog record: W8b)."
+   Exactly once (W8b): a request id is [client seq], client one per follower worker (its tab and thread), seq that
+   worker's own count — a worker sends seq n+1 only once n is answered, so a client's highest applied seq says which
+   of its requests were applied. The owner's commit of a request carries its id in the journal record
+   (eve.atom/*request-id*), anchors carry each client's highest seq, and an owner that took over reads them back
+   (eve.atom/applied-request-seq): a resend of a request a dead owner applied is answered, not applied again. The
+   live owner also keeps each reply, to answer a resend with what it answered first."
   (:require
    [eve.atom :as atom]
    [eve.opfs :as opfs]
+   [eve.thread-host :as h]
    [eve.wire :as wire]))
 
 ;; ---- the owner's server
@@ -45,13 +49,17 @@
 (defn- handle [{:keys [op base id init expected new rid]}]
   (case op
     :deref {:ok true :value @(the-atom base id init)}
-    :cas (let [[tab seq] rid]
-           (or (get-in @applied [tab seq])
-               (let [a (the-atom base id init)
-                     won (volatile! false)
-                     after (swap! a (fn [cur] (if (= cur expected) (do (vreset! won true) new) (do (vreset! won false) cur))))
+    :cas (let [[client seq] rid
+               a (the-atom base id init)]
+           (or (get-in @applied [client seq])
+               (when-let [done (atom/applied-request-seq (get @domains base) client)]
+                 ;; applied before this owner (its record, or an anchor, says so): answered as won, not applied again
+                 (when (<= seq done) {:ok true :value @a :resent true}))
+               (let [won (volatile! false)
+                     after (binding [atom/*request-id* rid]
+                             (swap! a (fn [cur] (if (= cur expected) (do (vreset! won true) new) (do (vreset! won false) cur)))))
                      reply {:ok @won :value after}]
-                 (remember! tab seq reply)
+                 (remember! client seq reply)
                  reply)))))
 
 (defn serve!
@@ -76,6 +84,13 @@
             (recur req)))))))
 
 ;; ---- the follower atom
+
+(defonce ^:private my-seq (atom 0))
+
+(defn- client-id
+  "This worker's client id: its tab and thread, as one i32."
+  []
+  (hash [(opfs/tab-id) (h/self)]))
 
 (defn- call! [m]
   (let [deadline (+ (js/Date.now) 30000)]
@@ -121,7 +136,7 @@
               v0 @this
               v1 (g v0)
               r (call! {:op :cas :base base :id id :init init :expected v0 :new v1
-                        :rid [(opfs/tab-id) (opfs/next-seq!)]})]
+                        :rid [(client-id) (swap! my-seq inc)]})]
           (cond
             (= ::flipped r) (recur wait)
             (:ok r) (do (reset! cache [c (:value r)]) (:value r))

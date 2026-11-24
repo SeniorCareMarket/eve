@@ -580,27 +580,59 @@
   [blocks pins]
   (+ 16 4 (reduce + 0 (map (fn [blk] (+ 16 (alength ^bytes (:bytes blk)))) blocks)) 4 (* 8 (count pins))))
 
+;; A request id (W8 of the OPFS tier: a follower tab's compare-and-set the owner applied): [client seq], two i32s,
+;; in an optional trailer — RID_TAG client seq — after a COMMIT or NOREDO body, and as a table — RID_TAG count, then
+;; [client seq] pairs, each client's highest applied seq — after an ANCHOR's atom table. A body without one reads as
+;; before.
+(def ^:const RID_TAG 0x52494431)            ;; "RID1"
+(def ^:const RID_BYTES 12)
+(def ^:const ANCHOR_RIDS_MAX
+  "The clients an ANCHOR's request-id table holds (the rest of its slot after the atom table)."
+  240)
+
 (defn encode-commit-body
   "A COMMIT body: the delta [slot old new hash]; the new blocks, each [off flags pointer len bytes] (W1, W2 by its
-   offset, W3); the pinned rows, each [off flags] (W4). With BLOCKS and PINS nil, a NOREDO body (the delta alone)."
-  [{:keys [slot old new hash]} blocks pins]
-  (let [n (if (or blocks pins) (commit-body-size blocks pins) 16)
-        [b i32! bytes!] (body-writer n)]
-    (i32! slot) (i32! old) (i32! new) (i32! hash)
-    (when (or blocks pins)
-      (i32! (count blocks))
-      (doseq [{:keys [off flags pointer bytes]} blocks]
-        (i32! off) (i32! flags) (i32! pointer) (i32! (alength ^bytes bytes)) (bytes! bytes))
-      (i32! (count pins))
-      (doseq [{:keys [off flags]} pins]
-        (i32! off) (i32! flags)))
-    b))
+   offset, W3); the pinned rows, each [off flags] (W4). With BLOCKS and PINS nil, a NOREDO body (the delta alone).
+   With RID ([client seq]), its trailer after."
+  ([delta blocks pins] (encode-commit-body delta blocks pins nil))
+  ([{:keys [slot old new hash]} blocks pins rid]
+   (let [n (+ (if (or blocks pins) (commit-body-size blocks pins) 16) (if rid RID_BYTES 0))
+         [b i32! bytes!] (body-writer n)]
+     (i32! slot) (i32! old) (i32! new) (i32! hash)
+     (when (or blocks pins)
+       (i32! (count blocks))
+       (doseq [{:keys [off flags pointer bytes]} blocks]
+         (i32! off) (i32! flags) (i32! pointer) (i32! (alength ^bytes bytes)) (bytes! bytes))
+       (i32! (count pins))
+       (doseq [{:keys [off flags]} pins]
+         (i32! off) (i32! flags)))
+     (when rid
+       (i32! RID_TAG) (i32! (nth rid 0)) (i32! (nth rid 1)))
+     b)))
+
+(defn- rid-at
+  "The request id of a trailer at P in B, or nil."
+  [^bytes b p]
+  (when (and (== (+ p RID_BYTES) (alength b)) (== (get-i32 b p) (i32/i32 RID_TAG)))
+    [(get-i32 b (+ p 4)) (get-i32 b (+ p 8))]))
+
+(defn body-rid
+  "A COMMIT or NOREDO body's request id [client seq], or nil: its structure walked, no bytes copied."
+  [^bytes b]
+  (let [n (alength b)]
+    (cond
+      (<= n 16) nil
+      (== n (+ 16 RID_BYTES)) (rid-at b 16)
+      :else (let [nb (get-i32 b 16)
+                  p (loop [k 0 p 20] (if (and (< k nb) (<= (+ p 16) n)) (recur (inc k) (+ p 16 (get-i32 b (+ p 12)))) p))]
+              (when (<= (+ p 4) n)
+                (rid-at b (+ p 4 (* 8 (get-i32 b p)))))))))
 
 (defn decode-commit-body
   "A COMMIT or NOREDO body as {:slot :old :new :hash :blocks [...] :pins [...]}."
   [^bytes b]
   (let [delta {:slot (get-i32 b 0) :old (get-i32 b 4) :new (get-i32 b 8) :hash (get-i32 b 12)}]
-    (if (<= (alength b) 16)
+    (if (or (<= (alength b) 16) (some? (rid-at b 16)))
       (assoc delta :blocks [] :pins [])
       (let [nb (get-i32 b 16)
             [blocks p] (loop [k 0 p 20 acc []]
@@ -687,11 +719,39 @@
         [t label]))))
 
 (defn encode-anchor-body
-  "An ANCHOR body: the whole atom table."
-  [^bytes table]
-  (let [[b _ bytes!] (body-writer (alength table))]
-    (bytes! table)
-    b))
+  "An ANCHOR body: the whole atom table; with RIDS ({client seq}, at most ANCHOR_RIDS_MAX clients: the highest
+   clients kept), the request-id table after it."
+  ([table] (encode-anchor-body table nil))
+  ([^bytes table rids]
+   (let [rids (when (seq rids) (take ANCHOR_RIDS_MAX (sort-by (comp - key) rids)))
+         [b i32! bytes!] (body-writer (+ (alength table) (if rids (+ 8 (* 8 (count rids))) 0)))]
+     (bytes! table)
+     (when rids
+       (i32! RID_TAG) (i32! (count rids))
+       (doseq [[c q] rids] (i32! c) (i32! q)))
+     b)))
+
+(defn anchor-rids
+  "An ANCHOR record's request-id table {client seq} ({} for none)."
+  [anchor]
+  (let [^bytes b (:body anchor)
+        p TABLE_BYTES]
+    (if (and b (>= (alength b) (+ p 8)) (== (get-i32 b p) (i32/i32 RID_TAG)))
+      (let [n (get-i32 b (+ p 4))]
+        (into {} (map (fn [k] [(get-i32 b (+ p 8 (* 8 k))) (get-i32 b (+ p 12 (* 8 k)))]))
+              (range (min n (quot (- (alength b) p 8) 8)))))
+      {})))
+
+(defn fold-rids
+  "{client seq}: ANCHOR's request-id table with the request ids of RECS' COMMIT and NOREDO records (logical records,
+   in log order), each client's highest seq."
+  [anchor recs]
+  (reduce (fn [m rec]
+            (if-let [[c q] (when (or (== K_COMMIT (:kind rec)) (== K_NOREDO (:kind rec))) (body-rid (:body rec)))]
+              (assoc m c (max q (get m c q)))
+              m))
+          (anchor-rids anchor)
+          recs))
 
 ;; ---------------------------------------------------------------------------
 ;; The legacy journal (EVJ1, <base>.journal) — read once, for migration (§4.7)

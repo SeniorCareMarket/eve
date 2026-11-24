@@ -826,6 +826,12 @@
   ;; (phase 3). The adapter's now-ms is the one clock on every host.
   (proc/now-ms))
 
+(def ^:dynamic *request-id*
+  "When bound to [client seq] (two i32s: the OPFS tier's follower server, applying a follower tab's compare-and-set),
+  the journaled commit a swap! wins carries it in its record (eve.jlog's request-id trailer), and anchors carry each
+  client's highest seq (applied-request-seq), so a request resent after the owner's tab went is applied once."
+  nil)
+
 (def ^:dynamic *flush-log*
   "When bound to an atom, each commit's wait on the log's watermark (jlog-commit!) conjs {:at <wall-ms> :ms
   <duration-ms>}. Bench/workload instrumentation only."
@@ -947,9 +953,27 @@
             pins (filterv (fn [off] (and (not (contains? mine off)) (alloc/desc-row sio off)))
                           (distinct (map u32 touches)))
             body (+ 24 (reduce + 0 (map (fn [off] (+ 16 (d/slab-size (alloc/decode-class-idx off)))) kept))
-                    (* 8 (count pins)))
+                    (* 8 (count pins)) (if *request-id* jlog/RID_BYTES 0))
             cnt (max 1 (quot (+ body (dec jlog/REC_MAX_BODY)) jlog/REC_MAX_BODY))]
         (if (> cnt (quot (:n log) 4)) :fallback {:cnt cnt :kept kept :pins pins})))))
+
+(defn- note-rid!
+  "A commit this process wrote carried request id [client seq]: the journal's table (once read: applied-request-seq)
+   takes it."
+  [journal [c q]]
+  (when-let [rids (:rids journal)]
+    (swap! rids (fn [m] (when m (assoc m c (max q (get m c q))))))))
+
+(defn- jlog-applied-seq
+  "The highest seq of CLIENT's requests the journaled domain DS applied (*request-id*), or nil: read from the log
+   (the newest anchor's table and the prefix after it) on first use, then kept by this process's commits — the
+   one process that writes request ids (the owner tab's follower server)."
+  [ds client]
+  (when-let [{:keys [rids log]} (:journal ds)]
+    (when (nil? @rids)
+      (reset! rids (let [[anchor & recs] (jlog/recovery-prefix log)]
+                     (if anchor (jlog/fold-rids anchor (jlog/logical recs)) {}))))
+    (get @rids client)))
 
 (defn- jlog-drop-pending!
   "Let go the old roots a batch's commits deferred (their records are durable now)."
@@ -967,11 +991,13 @@
   (let [{:keys [root-r sio journal]} ds
         delta {:slot slot :old old-ptr :new new-ptr
                :hash (mem/-load-i32 root-r (d/atom-slot-offset slot d/ATOM_SLOT_HASH_OFFSET))}
+        rid *request-id*
         body (if fallback?
-               (jlog/encode-commit-body delta nil nil)
+               (jlog/encode-commit-body delta nil nil rid)
                (let [[blocks pins] (jlog-redo sio (:kept plan) (:pins plan))]
-                 (jlog/encode-commit-body delta blocks pins)))
+                 (jlog/encode-commit-body delta blocks pins rid)))
         written? (jlog-write! ds seq (if fallback? jlog/K_NOREDO jlog/K_COMMIT) label body cnt)
+        _ (when rid (note-rid! journal rid))
         last-seq (i32/i32 (+ seq (dec cnt)))
         limit (:limit journal)
         boundary? (or (<= limit 1)
@@ -1027,25 +1053,29 @@
           anchor (jlog/read-record log a)
           recs (loop [s (i32/i32 (inc a)) acc []]
                  (if (== s seq) acc (recur (i32/i32 (inc s)) (conj acc (jlog/read-record log s)))))
-          [table label] (jlog/fold anchor (jlog/logical (remove nil? recs)))]
-      (when (jlog-write! ds seq jlog/K_ANCHOR label (jlog/encode-anchor-body table))
+          lrecs (jlog/logical (remove nil? recs))
+          [table label] (jlog/fold anchor lrecs)
+          rids (merge-with max (jlog/fold-rids anchor lrecs) (some-> (:rids (:journal ds)) deref))]
+      (when (jlog-write! ds seq jlog/K_ANCHOR label (jlog/encode-anchor-body table rids))
         (jlog-await! ds seq)
         (jlog/advance-anchor! log seq)))
     (jlog-drop-pending! ds)))
 
 (defn- jlog-anchor-fresh!
-  "Lay down a fresh ANCHOR of the root's table at the log's tail (a new log, or recovery's end): reserve, write,
-   force, advance. Run with no live writer (create, or under the recovery hold)."
-  [root-r log]
-  (let [{:keys [seq]} (jlog/reserve! log 0 0 (constantly false) d/HEARTBEAT_TIMEOUT_MS)
-        table (mem/-read-bytes root-r d/ATOM_TABLE_START jlog/TABLE_BYTES)]
-    (jlog/claim-seal! log seq 0)
-    (jlog/write-slot! log seq (jlog/encode-record seq jlog/K_ANCHOR (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
-                                                  (:nonce log) 0 (jlog/encode-anchor-body table)))
-    (jlog/release! log seq)
-    (jlog/force-through! log)
-    (jlog/advance-anchor! log seq)
-    seq))
+  "Lay down a fresh ANCHOR of the root's table (and RIDS, the request-id table recovery folded) at the log's tail (a
+   new log, or recovery's end): reserve, write, force, advance. Run with no live writer (create, or under the
+   recovery hold)."
+  ([root-r log] (jlog-anchor-fresh! root-r log nil))
+  ([root-r log rids]
+   (let [{:keys [seq]} (jlog/reserve! log 0 0 (constantly false) d/HEARTBEAT_TIMEOUT_MS)
+         table (mem/-read-bytes root-r d/ATOM_TABLE_START jlog/TABLE_BYTES)]
+     (jlog/claim-seal! log seq 0)
+     (jlog/write-slot! log seq (jlog/encode-record seq jlog/K_ANCHOR (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET)
+                                                   (:nonce log) 0 (jlog/encode-anchor-body table rids)))
+     (jlog/release! log seq)
+     (jlog/force-through! log)
+     (jlog/advance-anchor! log seq)
+     seq)))
 
 (defn- jlog-replay!
   "Recovery of a log (doc/jlog-redo-spec.md §6), under the recovery hold, no live writer: the newest anchor and
@@ -1084,7 +1114,7 @@
       ;; later recovery would read them as the prefix's continuation
       (jlog/void-from! log next)
       (jlog/rebuild-header! log next)
-      (jlog-anchor-fresh! root-r log)
+      (jlog-anchor-fresh! root-r log (when anchor (jlog/fold-rids anchor (jlog/logical recs))))
       (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))))
 
 (defn- domain-live?
@@ -1266,7 +1296,9 @@
                     :limit   (or (:journal-batch opts) 1)
                     :pending (clojure.core/atom 0)
                     ;; the old roots a batch's commits let go once their records are durable (jlog-commit!)
-                    :pending-drops (clojure.core/atom [])})
+                    :pending-drops (clojure.core/atom [])
+                    ;; the request-id table (applied-request-seq), read from the log on first use
+                    :rids (clojure.core/atom nil)})
         journal  (cond-> journal
                    (:journal-window-ms opts)
                    (assoc :window-ms (:journal-window-ms opts)
@@ -2519,6 +2551,12 @@
             d  (MmapAtomDomain. ds (clojure.core/atom {}))]
         (swap! domain-cache assoc base-path d)
         d)))
+
+(defn applied-request-seq
+  "The highest seq of CLIENT's requests (*request-id*) the journaled DOMAIN (an MmapAtomDomain) applied, or nil:
+   what the newest anchor and the log after it say, kept by this process's commits after the first read."
+  [domain client]
+  (jlog-applied-seq (.-domain-state ^MmapAtomDomain domain) client))
 
 (defn join-atom-domain
   "Join an existing mmap domain at base-path (prefer persistent-atom-domain)."
