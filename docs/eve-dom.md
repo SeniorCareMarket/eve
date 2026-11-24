@@ -1,7 +1,7 @@
 # eve.dom — a browser program whose main thread is a worker
 
 The program's main runs in a worker; window and document there are proxies for the page's, so code made for a page
-(reagami, canvas-confetti, d3-selection) runs unchanged. The page's own thread only executes DOM operations
+(reagami, canvas-confetti, d3-selection and d3-transition) runs unchanged. The page's own thread only executes DOM operations
 (`eve.dom.screen`: a fixed op set over integer handles, no eval). Ideas after cljs-thread's dom proxy and VSv2's DOM
 executor; nothing of either is a dependency.
 
@@ -41,6 +41,6 @@ pools before main's worker starts.
   (`(.-origin js/location)`) for fetch/importScripts.
 
 ## Tests
-`bb test:browser:dom` (conformance by each transport, Chromium), `bb test:browser:dom-demo` (reagami counter + confetti).
+`bb test:browser:dom` (conformance by each transport, Chromium), `bb test:browser:dom-demo` (reagami counter, ten clicks moving a d3-transition bar to 100%, then confetti; vendored libraries and licences in `adapters/dom/browser/demo/public/vendor`).
 `EVE_BROWSER=firefox|webkit` with `NODE_PATH` (playwright) and `PLAYWRIGHT_BROWSERS_PATH` runs another engine;
 `EVE_BROWSER_COI=0`, `EVE_BROWSER_QUERY=eve-dom-transport=sw`, `EVE_BROWSER_EXPECT=sab|sw` select a transport.
