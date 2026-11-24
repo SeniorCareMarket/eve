@@ -11,8 +11,11 @@
             [eve.process :as proc]
             [eve.atom :as a]
             [eve.mem :as mem]
+            [eve.region :as region]
+            [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
-            #?(:cljs ["os" :as os])))
+            #?(:cljs ["os" :as os]))
+  #?(:lpy (:import os)))
 
 (defn- fresh-base []
   (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :jank "/tmp" :cljr (System.IO.Path/GetTempPath)
@@ -141,3 +144,16 @@
              (is (= {:pins before :published (portable-published before)} (live))))))
       (finally
         (a/close-atom-domain! dom)))))
+
+(deftest growth-forces-only-bytes-that-exist
+  ;; The people-500 DataScript build grows a descriptor column that is
+  ;; 32 bytes long. force-grown! always asked for a 64-byte force, which
+  ;; basilisp's mmap.flush refuses ("flush values out of range"); msync
+  ;; on the other hosts let it pass. Each size forces without a throw.
+  (let [p (str (fresh-base) ".desc-count")]
+    (proc/ensure-parent-dir! p)
+    (doseq [n [32 64 128]]
+      (let [r (region/open-mmap-region p n)]
+        (is (nil? (#'alloc/force-grown! r)) (str "a " n "-byte region"))
+        (is (= n (mem/-byte-length r)))))
+    #?(:clj (.delete (java.io.File. ^String p)) :cljs (.unlinkSync (js/require "fs") p) :lpy (os/remove p) :default nil)))

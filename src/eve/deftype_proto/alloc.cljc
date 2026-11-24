@@ -65,7 +65,10 @@
    forces no slab file, so every block its record names must lie in a file whose size a crash keeps."
   [& regions]
   (doseq [r regions]
-    (when r (mem/sync-region! r 0 64))))
+    ;; The descriptor-count/flag files of a small class can be only
+    ;; 32 bytes. mmap.flush correctly rejects a 64-byte range there;
+    ;; force the existing prefix, never a range beyond the mapping.
+    (when r (mem/sync-region! r 0 (min 64 (mem/-byte-length r))))))
 
 (defn- fill-zero!
   "Write zeros over the first N bytes of a new file's region R, so the file has no hole: eve.fsync forces a set of
