@@ -17,6 +17,7 @@ CLOJURE_LOAD_PATH=... cljr -m eve.runner.cljr-main perf     # the performance su
 
 | Run | Result | When (ET) |
 |---|---|---|
+| `bb test:cljr eve.type-io-test` | **8 tests, 47 assertions, 0 failures, 0 errors** (was 6E/2F: pr-str as `#object[...]`, then "No reader function for tag object"). host-deftype on CLR now realizes IPrintWithWriter as print-method, without jvm-translate-protos. | 2026-11-24, 4:51:07–4:51:24 AM ET, this tree |
 | `bb test:cljr eve.numeric-test eve.numeric-tags-test eve.overflow-test` | **13 tests, 168 assertions, 0 failures, 0 errors**. `eve.numeric-test` alone is 6/84/0/0 (was 57E/3F on the 12:38 AM official run: String→BigInteger from `(BigInteger. s)`, checked `+` overflow past a long, typetags not recognized). `numeric-tags` and `overflow` stay clean. | 2026-11-24, 4:35–4:36 AM ET, this tree (`eve.numeric` :cljr arms) |
 | `bb test:cljr` | Official shared suite **loads and runs**. 22 namespaces started; 16 clean (clock-uuid, associative-transient, hamt-util, eve-bytes-fixture, numeric-tags, overflow, collection-hash, reference-tag, big-value, sorted-coll, keyring, value-buffer, vec-retire, reclaim, tally, domain-open). 6 failed (90 ERROR, 7 FAIL) before the run was killed mid `eve.rrb-vector-test` `test-splicing`: `eve.numeric-test` 57E/3F (including String→BigInteger in optional-arithmetic); `eve.type-io-test` 6E/2F (tagged print/read — "No reader function for tag object", print as `#object[...]`); `eve.record-test` 1E/2F; `eve.deftype.type-id-test` 4E; `eve.sorted-migration-test` 2E; `eve.rrb-vector-test` 20E (`RRBChunkedSeq` is not `clojure.lang.ISeq`; slab-domain: "An Eve value allocated in a different slab domain cannot be put in this one" on VectorNode during withMeta / pack-all / deliver-flat). `eve.thread-*` and `eve.net.crypto-fast-path-test` did not run. Not green. | 2026-11-24, 12:38–12:46 AM ET, this tree (compile-complete `eve.flat.chunk` / `eve.flat.freeze` port) |
 | `bb test:cljr` | **202 tests, 4,499 assertions, 0 failures, 0 errors** (188 s, peak 958 MB, the process tree) | 2026-10-21, this tree (the final pass) |
@@ -31,10 +32,10 @@ the red-black set, int-map, sorted collections, core.rrb-vector's suite, big val
 numeric and reference tags, collection hashing, the vector retire walk, transient reclaim, the tally, domain open, and
 the whole thread feature
 including the network rung. Not run: the four typed-array suites — ClojureCLR has no typed-array adapter yet.
-On 2026-11-24 the official battery loads through `eve.domain-open-test`. `eve.numeric-test` is green on this tree
-(6/84/0/0, 4:35 AM ET); the 12:38 AM official pass's remaining failures are `type-io`, `record`, `deftype.type-id`,
-`sorted-migration`, and `rrb-vector` (ISeq / slab-domain). The thread/net namespaces did not run in that pass.
-October's green counts are historical and are not the current official result.
+On 2026-11-24 the official battery loads through `eve.domain-open-test`. On this tree `eve.numeric-test` is 6/84/0/0
+(4:35 AM ET) and `eve.type-io-test` is 8/47/0/0 (4:51 AM ET). The 12:38 AM official pass's remaining failures are
+`record`, `deftype.type-id`, `sorted-migration`, and `rrb-vector` (ISeq / slab-domain). The thread/net namespaces did
+not run in that pass. October's green counts are historical and are not the current official result.
 
 ## Performance
 

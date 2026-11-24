@@ -31,8 +31,8 @@ PersistentIntMap was removed. The cross-host table is in
 and the portable flat-io `:cljr` arm plus its conformance test pass
 (11 / 264 / 0 / 0, 2026-11-24 12:04 AM ET). Official `bb test:cljr`
 now loads and runs (16 of 22 started namespaces clean on 2026-11-24
-12:38–12:46 AM ET; `eve.numeric-test` 6/84/0/0 at 4:35 AM ET on this tree;
-remaining failures in
+12:38–12:46 AM ET; `eve.numeric-test` 6/84/0/0 and `eve.type-io-test` 8/47/0/0
+on this tree; remaining failures in
 [clojureclr.md](hosts/clojureclr.md)). `cljr -m eve.runner.cljr-main
 perf` has not been re-run at this pin.
 
@@ -239,8 +239,8 @@ these write shapes, at this pin.
 - **ClojureCLR host suite** — .NET 8.0.428 and Clojure.Main 1.12.6 are
   installed; flat-io conformance is 11 / 264 / 0 / 0. Official
   `bb test:cljr` loads and runs (16 of 22 started namespaces clean;
-  `eve.numeric-test` 6/84/0/0 at 4:35 AM ET; remaining failures in
-  [clojureclr.md](hosts/clojureclr.md)).
+  `eve.numeric-test` 6/84/0/0 and `eve.type-io-test` 8/47/0/0 on this tree;
+  remaining failures in [clojureclr.md](hosts/clojureclr.md)).
 - **clojerl host suite** — flat-io conformance is 11 / 260 / 0 / 0.
   The `:clje` `long`/`alength` refer is in this batch; official
   `bb test:clje` was not re-run and handle macros are still unported.

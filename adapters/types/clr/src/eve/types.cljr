@@ -215,10 +215,19 @@
    them, as the JVM's deftype does in vocab's jvm-field-renames.
    Interface translation of ClojureScript protocol heads stays with
    plain-type / eve-deftype; this entry point keeps the raw parsed
-   impls plus cljr-translate-protos (java.util.* / Object methods)."
+   impls plus cljr-translate-protos (java.util.* / Object methods).
+   IPrintWithWriter is realized as print-method (same as plain-type),
+   without running jvm-translate-protos on the impls."
   [_env type-name fields parsed]
-  (let [[fields parsed] (sio/plain-renames fields parsed nil)]
-    `(clojure.core/deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos parsed)))))
+  (let [[fields parsed] (sio/plain-renames fields parsed nil)
+        print (some (fn [{:keys [protocol methods]}]
+                      (when (= 'IPrintWithWriter (strip-cljs-core protocol))
+                        (let [{:keys [args body]} (first methods)]
+                          (list* 'fn args body))))
+                    parsed)]
+    `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos parsed)))
+         ~@(when print [(sio/print-method-form type-name print)])
+         ~type-name)))
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
 (defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))

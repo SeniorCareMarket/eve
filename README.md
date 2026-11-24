@@ -168,7 +168,7 @@ the other rows are the final pass of 2026-10-21/22 ET, not re-run for 0.9.0 or 0
 | ClojureScript (browser) | a cross-origin-isolated page | `bb test:browser` | **green**: 48 tests, 633 assertions (headless Chromium) |
 | babashka | bb 1.13 | `bb test:bb` | **green** (0.9.3.1): 251 tests / 4,678 assertions (30 namespaces) + 42 / 890 (the remaining 9), 0 failures, 0 errors both counts; `eve.thread-net-test` and `eve.aegis.rsabssa-test` excluded by name |
 | nbb | Node | `bb test:nbb` | **green**: 242 tests, 4,617 assertions |
-| ClojureCLR | .NET 8, ClojureCLR 1.12.6 | `bb test:cljr` | Official suite loads (2026-11-24): `numeric-test` 6/84/0/0 on this tree (4:35 AM ET). Remaining from the 12:38 AM official pass: type-io, record/deftype type-id, sorted-migration, rrb ISeq/slab-domain. October 202 / 4,499 is historical. |
+| ClojureCLR | .NET 8, ClojureCLR 1.12.6 | `bb test:cljr` | Official suite loads (2026-11-24): `numeric-test` 6/84/0/0 and `type-io-test` 8/47/0/0 on this tree. Remaining: record/deftype type-id, sorted-migration, rrb ISeq/slab-domain. October 202 / 4,499 is historical. |
 | basilisp | CPython 3.13, basilisp 0.5.1 | `bb test:lpy` | 180 tests, 4,350 assertions passing, **7 errors**: eve.thread.domain's 120 s waits run out late in the full run (checklist 9.26; fold on a group's three with a leak of its own, 9.35); each of those namespaces alone green |
 | jolt | threaded Chez Scheme 10.4 | `bb test:jolt` | **green**: 199 tests, 4,479 assertions |
 | clojerl | the BEAM | `bb test:clje` | **green**: 198 tests, 4,400 assertions |
