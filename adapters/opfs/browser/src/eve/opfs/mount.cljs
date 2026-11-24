@@ -18,11 +18,41 @@
    not memory), and the request block's int words (a sync's runs travel in them) and string bytes."
   {:root "eve" :slots 256 :max-file-bytes (* 1024 1024 1024) :args-words (* 64 1024) :string-bytes (* 64 1024)})
 
-(defn- make-pool [{:keys [slots max-file-bytes args-words string-bytes]}]
-  #js {:ctl (js/SharedArrayBuffer. (+ (* 4 (+ opfs/ARGS args-words)) string-bytes))
-       :argsWords args-words
-       :svc (js/SharedArrayBuffer. (+ 64 (* 4 args-words)))
-       :slots (into-array (repeatedly slots #(js/SharedArrayBuffer. 0 #js {:maxByteLength max-file-bytes})))})
+(defn- slot-buffers
+  "n growable SharedArrayBuffers of max bytes each; nil when the engine will not reserve them all (WebKit reserves
+   about 62 GiB of growable buffers a page, measured: 62 x 1 GiB, 248 x 256 MiB)."
+  [n max]
+  (try (into-array (repeatedly n #(js/SharedArrayBuffer. 0 #js {:maxByteLength max})))
+       (catch js/RangeError _ nil)))
+
+(def ^:private min-file-bytes (* 16 1024 1024))
+
+(def ^:private constrained-budget
+  "Where the engine caps growable buffers (WebKit, ~62 GiB a process), the pool reserves at most this: each eve
+   worker's own slabs reserve ~5 GB there (eve.deftype-proto.wasm/create-slab-memory)."
+  (* 4 1024 1024 1024))
+
+(defn- make-pool
+  "The pool: the request block, the svc block and the slots. A file's largest size is :max-file-bytes where the
+   engine reserves every slot so; where it does not (WebKit: one budget for every frame and worker of the process),
+   a quarter of the largest size it does reserve, and at most constrained-budget in all, so the pool leaves the rest
+   to the page's workers (.maxFileBytes says what it got; fewer :slots, bigger files)."
+  [{:keys [slots max-file-bytes args-words string-bytes]}]
+  (let [[max bufs] (loop [m max-file-bytes]
+                     (if-let [b (slot-buffers slots m)]
+                       (if (or (== m max-file-bytes) (<= (quot m 4) min-file-bytes))
+                         [m b]
+                         (let [q (max min-file-bytes (min (quot m 4) (quot constrained-budget slots)))]
+                           [q (or (slot-buffers slots q) b)]))
+                       (if (> (quot m 2) min-file-bytes)
+                         (recur (quot m 2))
+                         (throw (ex-info "eve.opfs.mount: the engine reserves no pool of these slots"
+                                         {:slots slots :max-file-bytes m})))))]
+    #js {:ctl (js/SharedArrayBuffer. (+ (* 4 (+ opfs/ARGS args-words)) string-bytes))
+         :argsWords args-words
+         :svc (js/SharedArrayBuffer. (+ 64 (* 4 args-words)))
+         :maxFileBytes max
+         :slots bufs}))
 
 (defonce ^:private listeners (atom []))   ; the page's on-role! fns: never on the pool, which workers receive (cloned)
 

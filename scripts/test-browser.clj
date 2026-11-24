@@ -119,7 +119,9 @@
   (if engine
     ;; another engine (firefox, webkit) through Playwright (NODE_PATH, PLAYWRIGHT_BROWSERS_PATH as usual)
     (p/process {:out :string :err :string :dir eve}
-               "node" "scripts/browser-open.cjs" engine page-url)
+               "node" "scripts/browser-open.cjs" engine page-url
+               ;; the OPFS page needs a persistent profile (WebKit has no OPFS in an ephemeral context)
+               (if opfs? profile ""))
     (p/process {:out :string :err :string}
                (or (find-chrome)
                    (throw (ex-info "test:browser: no Chromium found — set EVE_CHROME or run: npx playwright install chromium" {})))
