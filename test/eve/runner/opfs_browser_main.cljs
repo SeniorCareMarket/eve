@@ -1,9 +1,9 @@
 (ns eve.runner.opfs-browser-main
   "eve's OPFS disk tier in a browser (EVE_BROWSER_OPFS=1 bb test:browser builds this into a page): the page mounts
-   the OPFS pool (eve.opfs/mount!) before its threads start, then runs the suite in a worker, as the thread
+   the OPFS pool (eve.opfs.mount/mount!) before its threads start, then runs the suite in a worker, as the thread
    conformance page does; the result is POSTed to /result (a mount that fails is the result)."
   (:require [cljs.test :as t]
-            [eve.opfs :as opfs]
+            [eve.opfs.mount :as mount]
             [eve.thread-host :as h]
             [eve.opfs-browser-test]
             [eve.region-opfs-test]))
@@ -21,7 +21,8 @@
 
 (defmethod t/report [::t/default :error] [m]
   (t/inc-report-counter! :error)
-  (note! (assoc m :actual (str (:actual m)) :testing-contexts (t/testing-contexts-str)))
+  (note! (assoc m :actual (str (:actual m) (when-let [st (some-> ^js (:actual m) .-stack)] (str " " (subs st 0 (min 1500 (count st))))))
+                :testing-contexts (t/testing-contexts-str)))
   (println "ERROR" (str (:actual m))))
 
 (defmethod t/report [::t/default :end-run-tests] [m]
@@ -63,6 +64,6 @@
   (when-not (h/run-thread!)
     (let [rows (main-rows)
           t0 (js/Date.now)]
-      (-> (opfs/mount! {:root "eve-opfs-test"})
+      (-> (mount/mount! {:root "eve-opfs-test"})
           (.then (fn [p] (start! (assoc rows :mounted (some? p)) t0 (.-mode p)))
                  (fn [e] (post! {:op :mount-failed :message (str e) :main (assoc rows :mounted false)})))))))

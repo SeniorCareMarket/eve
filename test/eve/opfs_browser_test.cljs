@@ -2,9 +2,12 @@
   "eve.opfs in a browser (the OPFS disk tier spec, W3/W4): run in a worker of a page that mounted the pool before its
    threads started. A region's synced bytes are the file's after the io worker closes every handle and the file is
    opened afresh; workers that open one path share its bytes; a file reopened bigger keeps its bytes; and the file
-   operations eve.process needs answer as a file system does."
+   operations eve.process needs answer as a file system does; and a persistent atom (an mmap domain: eve.region's
+   open-mmap-region opens through eve.opfs here) keeps its value across a domain close, another worker's swap and
+   the io worker closing every file."
   (:require
    [cljs.test :refer [deftest is testing]]
+   [eve.atom :as atom]
    [eve.mem :as mem]
    [eve.opfs :as opfs]
    [eve.region]
@@ -13,6 +16,8 @@
 (def ^:private dir (str "t" (js/Date.now)))
 
 (defn- p [f] (str dir "/" f))
+
+(def ^:private exits (atom []))
 
 (defn- await-op [op n ms]
   (let [deadline (+ (js/Date.now) ms)]
@@ -23,6 +28,8 @@
               m (if (pos? left) (h/receive! left) :eve.thread/timeout)]
           (cond (= m :eve.thread/timeout) got
                 (and (map? m) (= op (:op m))) (recur (conj got m))
+                (and (map? m) (:eve.thread/exit m) (not= :normal (:reason m)))
+                (do (swap! exits conj m) got)
                 :else (recur got)))))))
 
 (defn adder
@@ -105,3 +112,70 @@
   (is (false? (opfs/delete-file! (p "x/to"))))
   (testing "errors come back as ex-info"
     (is (thrown-with-msg? js/Error #"not a file path" (opfs/file-size "../up")))))
+
+(defn joiner
+  "A worker's entry: join the domain at base, swap :count up, close, report."
+  [{:keys [reply base]}]
+  (let [d (atom/persistent-atom-domain base)
+        a (atom/persistent-atom {:id :eve/main :persistent base} nil)
+        n (:count (swap! a update :count inc))]
+    (atom/close-atom-domain! d)
+    (h/send! reply {:op :joined :count n})))
+
+(deftest a-persistent-atom-on-opfs
+  (let [b (p "db")
+        d (atom/persistent-atom-domain b)
+        a (atom/persistent-atom {:id :eve/main :persistent b} {:count 0})]
+    (swap! a update :count inc)
+    (is (= 1 (:count @a)))
+    (atom/close-atom-domain! d)
+    (testing "another worker joins and swaps"
+      (let [[w] (h/start-threads! 1 'eve.opfs-browser-test/joiner {:reply (h/self) :base b} {})
+            got (await-op :joined 1 60000)]
+        (is (= [2] (map :count got)) (pr-str @exits))
+        (h/stop-threads! [w])))
+    (testing "every file closed, the domain reopened from OPFS"
+      (opfs/close-all!)
+      (let [d2 (atom/persistent-atom-domain b)
+            c (atom/persistent-atom {:id :eve/main :persistent b} nil)]
+        (is (= 2 (:count @c)))
+        (swap! c update :count inc)
+        (atom/close-atom-domain! d2)))
+    (opfs/close-all!)
+    (let [d3 (atom/persistent-atom-domain b)
+          c (atom/persistent-atom {:id :eve/main :persistent b} nil)]
+      (is (= 3 (:count @c)))
+      (atom/close-atom-domain! d3))))
+
+(defn committer
+  "A worker's entry: open the domain at base, commit :count n times, report, and never close (a tab that dies)."
+  [{:keys [reply base n]}]
+  (let [_d (atom/persistent-atom-domain base)
+        a (atom/persistent-atom {:id :eve/main :persistent base} {:count 0})]
+    (dotimes [_ n] (swap! a update :count inc))
+    (h/send! reply {:op :committed :count (:count @a)})
+    (loop [] (when-not (= :eve.thread/stop (h/receive! -1)) (recur)))))
+
+(defn reader
+  "A worker's entry: open the domain at base, report :count."
+  [{:keys [reply base]}]
+  (try
+    (let [d (atom/persistent-atom-domain base)
+          a (atom/persistent-atom {:id :eve/main :persistent base} nil)
+          n (:count @a)]
+      (atom/close-atom-domain! d)
+      (h/send! reply {:op :read :count n}))
+    (catch :default e
+      (h/send! reply {:op :read :error (str e) :stack (some-> (.-stack e) (subs 0 1500))}))))
+
+(deftest a-commit-survives-without-a-close
+  (let [b (p "crash")
+        [w] (h/start-threads! 1 'eve.opfs-browser-test/committer {:reply (h/self) :base b :n 25} {})
+        got (await-op :committed 1 60000)]
+    (is (= [25] (map :count got)) (pr-str @exits))
+    ;; every handle closed with the committer's domain open: what the file holds is what its commits forced
+    (opfs/close-all!)
+    (let [[r] (h/start-threads! 1 'eve.opfs-browser-test/reader {:reply (h/self) :base b} {})
+          got (await-op :read 1 60000)]
+      (is (= [25] (map :count got)) (pr-str [@exits got]))
+      (h/stop-threads! [w r]))))

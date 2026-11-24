@@ -203,6 +203,15 @@
     (.msync ^js (native) buf byte-off len)
     nil))
 
+(defonce ^:private file-opener (atom nil))
+
+(defn register-file-opener!
+  "Open every file region through (f path size-bytes opts) instead of the Node addon: a host whose files are its
+   own (a browser's OPFS, eve.opfs, which registers itself when loaded)."
+  [f]
+  (reset! file-opener f)
+  nil)
+
 (declare ->LustreMmapRegion)
 
 (defn open-mmap-region
@@ -210,17 +219,21 @@
    If the file is new it is truncated to size-bytes.
    Returns a NodeMmapRegion (default) or LustreMmapRegion (when opts
    carries :lustre? true — a provider choice at domain-open time, never
-   an ambient flag).
+   an ambient flag). A host with files of its own (a browser's OPFS: eve.opfs) registers their opener
+   (register-file-opener!), and every path opens through it.
 
    Example:
      (mem/open-mmap-region \"/tmp/eve-shard-0.mem\" (* 64 1024 1024))"
   ([path size-bytes] (open-mmap-region path size-bytes nil))
   ([path size-bytes opts]
-   (if (:lustre? opts)
+   (cond
+     @file-opener (@file-opener path size-bytes opts)
+     (:lustre? opts)
      (let [result (.openWithFd ^js (native) path size-bytes)]
        ;; its deftype is below: the factory, declared first (sci, nbb's
        ;; interpreter, resolves a form's symbols when it reads the form)
        (->LustreMmapRegion (.-buf result) (.-fd result) size-bytes))
+     :else
      (let [buf (.open ^js (native) path size-bytes)]
        (NodeMmapRegion. buf size-bytes)))))
 

@@ -638,15 +638,17 @@
     instance))
 
 (defn register-mmap-slab-instance!
-  "Register a NodeMmapRegion as a slab instance (no WASM, no SAB).
+  "Register a file region as a slab instance (no WASM): a NodeMmapRegion (its mapping, a Node Buffer) or a
+   browser's file region (eve.region.opfs: the file's SharedArrayBuffer, viewed for the region's byte length).
    Called by alloc/init-mmap-slab! and alloc/open-mmap-slab!.
    bitmap-region is the separate bitmap file's region; bitmap ops use it.
    Block data reads/writes use :u8/:dv views from the data region."
   [class-idx ^js region bitmap-region]
   (let [node-buf (.-buf region)
-        ab       (.-buffer node-buf)
-        boff     (.-byteOffset node-buf)
-        blen     (.-byteLength node-buf)
+        sab?     (instance? js/SharedArrayBuffer node-buf)
+        ab       (if sab? node-buf (.-buffer node-buf))
+        boff     (if sab? 0 (.-byteOffset node-buf))
+        blen     (if sab? (mem/-byte-length region) (.-byteLength node-buf))
         instance {:memory        nil
                   :exports        nil
                   :region         region

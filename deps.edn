@@ -37,7 +37,7 @@
                    ;; the portable crypto adapter, as in :node-test: JVM-loadable eve.crypto (.cljc) for the macro pass
                    "adapters/crypto/portable/src" "adapters/core/clojure/src" "adapters/completion/clojure/src" "adapters/core/cljs-compiler/src"
                    "adapters/coll/cljs/src" "adapters/slab/module/src" "adapters/typed-view/js/src" "adapters/region/js/src"
-                   "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/node/src" "adapters/gc/js/src"
+                   "adapters/encoding/js/src" "adapters/int32/js/src" "adapters/codec/js/src" "adapters/process/browser/src" "adapters/gc/js/src"
                    "adapters/thread/browser/src" "adapters/opfs/browser/src" "adapters/dom/browser/src"
                    "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jvm-varhandle/src" "adapters/encoding/java/src"
                    "adapters/int32/jvm/src" "adapters/codec/byte-array/src" "adapters/process/java/src" "adapters/gc/java/src"
