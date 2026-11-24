@@ -1,0 +1,156 @@
+(ns eve.region
+  "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2) on basilisp under CPython for WASI,
+   which has no ctypes, no mmap and no threads: no code inside the module can map a file or make an atomic operation
+   on another process's memory. A file-backed region is therefore its host's: each operation is one frame of the
+   vs.host bridge (valuescript's vs/src/vs/host.vs, family `region`) on fd 1, its answer one JSON line on fd 0, and the
+   host (valuescript's hosts/lpy/lpy_host.py) makes the operation on its own MAP_SHARED mapping of the file with the
+   system libatomic and futex — the same calls adapters/region/ctypes makes in-process. So the atomics are real
+   atomics on the shared file, and a WASI body sits in the same domain as every other seat.
+
+     ESC _ vshost SP [rid,\"region\",verb,arg…] ESC \\        {\"t\":\"ans\",\"r\":rid,\"v\":value} (or \"error\":why)
+
+   verbs: open path size → handle · load-i32/i64 h off · store-i32/i64 h off v · cas-i32/i64 h off expected desired
+   (the witness) · add-i32/i64 h off delta (the old value) · xchg-i32 h off v · wait-i32 h off expected timeout-ms
+   (\"ok\" \"not-equal\" \"timed-out\") · notify-i32 h off n · read h off len (base64) · write h off base64 ·
+   sync h · sync-range h off len.
+
+   One request is outstanding at a time (this module has one thread), so an answer is the next line on fd 0. Under no
+   host — the stock wasmtime CLI — the first open fails loudly: no host serves op family :region.
+
+   make-heap-region is in-module: a bytearray this one thread alone reaches, so a load or store is the operation and
+   a wait whose word still holds its value times out at once (nothing else can change it)."
+  (:refer-clojure :exclude [aget aset alength byte-array int-array long-array object-array
+                            into-array unchecked-byte unchecked-int unchecked-long
+                            unchecked-inc-int unsigned-bit-shift-right long double class
+                            locking transient persistent! conj! assoc! bytes objects
+                            const-bytes const-objects])
+  (:require
+   [eve.host :refer [aget aset alength byte-array int-array long-array object-array
+                     into-array unchecked-byte unchecked-int unchecked-long
+                     unchecked-inc-int unsigned-bit-shift-right long double class locking
+                     transient persistent! conj! assoc! bytes objects const-bytes
+                     const-objects]]
+   [eve.mem :as mem :refer [-byte-length -load-i32 -store-i32! -cas-i32!
+                     -add-i32! -sub-i32! -exchange-i32! -load-i64 -store-i64! -cas-i64!
+                     -add-i64! -sub-i64! -wait-i32! -notify-i32! -supports-watch?
+                     -read-bytes -write-bytes! -atomic-rmw? -with-file-lock]])
+  (:import array base64 json math struct sys))
+
+;; Every region has atomic RMW unless it says otherwise.
+(extend-protocol mem/IHostAtomics
+  Object
+  (-atomic-rmw? [_] true)
+  (-with-file-lock [_ _byte-off f] (f)))
+
+(def ^:private esc (python/chr 27))
+(def ^:private next-rid (volatile! 0))
+
+(defn host-op!
+  "One operation of `family` (a string) on the host: the frame out on fd 1, its answer read from fd 0; the answer's
+   value. eve.journal-file (adapters/journal-file/vshost) takes its lock through it."
+  [family verb & args]
+  (let [rid (vswap! next-rid inc)]
+    (.write sys/stdout (str esc "_vshost " (json/dumps (python/list (concat [rid family verb] args))) esc "\\"))
+    (.flush sys/stdout)
+    (let [line (.readline sys/stdin)
+          m (when (pos? (count line)) (try (json/loads line) (catch python/Exception _ nil)))]
+      (cond
+        (not (and (instance? python/dict m) (= "ans" (.get m "t")) (= rid (.get m "r"))))
+        (throw (python/OSError (str "eve.region: no host serves op family :" family " (verb " verb ", fd 0 answered "
+                                    (pr-str (subs line 0 (min 120 (count line)))) ")")))
+        (some? (.get m "error"))
+        (throw (python/OSError (str "eve.region: the host refused " family " " verb ": " (.get m "error"))))
+        :else (.get m "v")))))
+
+(defn- op! [verb & args] (apply host-op! "region" verb args))
+
+(defn- timeout-arg [ms] (if (or (nil? ms) (and (float? ms) (math/isinf ms))) nil ms))
+
+(deftype VshostRegion [h size]
+  mem/IMemRegion
+  (-byte-length [_] size)
+  (-load-i32 [_ off] (op! "load-i32" h off))
+  (-store-i32! [_ off v] (op! "store-i32" h off (unchecked-int v)) nil)
+  (-cas-i32! [_ off expected desired] (op! "cas-i32" h off (unchecked-int expected) (unchecked-int desired)))
+  (-add-i32! [_ off delta] (op! "add-i32" h off (unchecked-int delta)))
+  (-sub-i32! [_ off delta] (op! "add-i32" h off (unchecked-int (- delta))))
+  (-exchange-i32! [_ off v] (op! "xchg-i32" h off (unchecked-int v)))
+  (-load-i64 [_ off] (op! "load-i64" h off))
+  (-store-i64! [_ off v] (op! "store-i64" h off (unchecked-long v)) nil)
+  (-cas-i64! [_ off expected desired] (op! "cas-i64" h off (unchecked-long expected) (unchecked-long desired)))
+  (-add-i64! [_ off delta] (op! "add-i64" h off (unchecked-long delta)))
+  (-sub-i64! [_ off delta] (op! "add-i64" h off (unchecked-long (- delta))))
+  (-wait-i32! [_ off expected timeout-ms]
+    (keyword (op! "wait-i32" h off (unchecked-int expected) (timeout-arg timeout-ms))))
+  (-notify-i32! [_ off n] (op! "notify-i32" h off (if (number? n) (int n) 2147483647)))
+  (-supports-watch? [_] true)
+  (-read-bytes [_ off len] (array/array "b" (base64/b64decode (op! "read" h off len))))
+  (-write-bytes! [_ off src]
+    (op! "write" h off (.decode (base64/b64encode (python/bytes src)) "ascii"))
+    nil)
+  mem/ISyncableRegion
+  (-sync! [_] (op! "sync" h) nil)
+  (-sync-range! [_ off len] (op! "sync-range" h off len) nil))
+
+(defn- wait-local [cur expected]
+  (if (not= cur (unchecked-int expected)) :not-equal :timed-out))
+
+(deftype HeapRegion [buf size]
+  mem/IMemRegion
+  (-byte-length [_] size)
+  (-load-i32 [_ off] (first (struct/unpack-from "<i" buf off)))
+  (-store-i32! [_ off v] (struct/pack-into "<i" buf off (unchecked-int v)) nil)
+  (-cas-i32! [_ off expected desired]
+    (let [cur (first (struct/unpack-from "<i" buf off))]
+      (when (= cur (unchecked-int expected)) (struct/pack-into "<i" buf off (unchecked-int desired)))
+      cur))
+  (-add-i32! [_ off delta]
+    (let [cur (first (struct/unpack-from "<i" buf off))]
+      (struct/pack-into "<i" buf off (unchecked-int (+ cur delta)))
+      cur))
+  (-sub-i32! [this off delta] (-add-i32! this off (- delta)))
+  (-exchange-i32! [_ off v]
+    (let [cur (first (struct/unpack-from "<i" buf off))]
+      (struct/pack-into "<i" buf off (unchecked-int v))
+      cur))
+  (-load-i64 [_ off] (first (struct/unpack-from "<q" buf off)))
+  (-store-i64! [_ off v] (struct/pack-into "<q" buf off (unchecked-long v)) nil)
+  (-cas-i64! [_ off expected desired]
+    (let [cur (first (struct/unpack-from "<q" buf off))]
+      (when (= cur (unchecked-long expected)) (struct/pack-into "<q" buf off (unchecked-long desired)))
+      cur))
+  (-add-i64! [_ off delta]
+    (let [cur (first (struct/unpack-from "<q" buf off))]
+      (struct/pack-into "<q" buf off (unchecked-long (+ cur delta)))
+      cur))
+  (-sub-i64! [this off delta] (-add-i64! this off (- delta)))
+  (-wait-i32! [_ off expected _timeout-ms] (wait-local (first (struct/unpack-from "<i" buf off)) expected))
+  (-notify-i32! [_ _off _n] 0)
+  (-supports-watch? [_] true)
+  (-read-bytes [_ off len] (array/array "b" (python/bytes (.__getitem__ buf (python/slice off (+ off len))))))
+  (-write-bytes! [_ off src]
+    (let [b (python/bytes src)]
+      (.__setitem__ buf (python/slice off (+ off (python/len b))) b))
+    nil)
+  mem/ISyncableRegion
+  (-sync! [_] nil)
+  (-sync-range! [_ _off _len] nil))
+
+(defn open-mmap-region
+  "Open (or create) a file-backed region of size-bytes at path-str, mapped MAP_SHARED by the host. The file grows to
+   size-bytes when it is shorter and is never truncated."
+  ([path-str size-bytes] (open-mmap-region path-str size-bytes nil))
+  ([path-str size-bytes opts]
+   (when (:lustre? opts)
+     (throw (python/NotImplementedError "eve on basilisp (WASI): no lustre regions")))
+   (VshostRegion. (op! "open" path-str size-bytes) size-bytes)))
+
+(defn make-heap-region
+  "An IMemRegion over a zero-initialized buffer of size-bytes, this module's own."
+  [size-bytes]
+  (HeapRegion. (python/bytearray size-bytes) size-bytes))
+
+(defn lustre-region?
+  "true for a region whose atomics are fcntl byte-range locks (a Lustre mount)."
+  [_r]
+  false)
