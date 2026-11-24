@@ -229,6 +229,7 @@
 ;; [0xEE][0xDB][0x28][len varint][raw] — the same bytes the JVM's codec writes for a byte[], the same run a flat chunk
 ;; carries less the magic. Other typed arrays keep FAST_TAG_TYPED_ARRAY; 0x1B subtype 1 written before still reads.
 (defn- bytes-run? [elem] (instance? js/Uint8Array elem))
+(defn- bin-bytes "An eve binary's scalar bytes (eve.bin): [EE DB 28][len varint][run]." [elem] (ser/bin-scalar-bytes elem))
 
 (defn- serialize-bytes [^js elem]
   (let [n (.-byteLength elem)
@@ -246,12 +247,16 @@
     buf))
 
 (defn- read-bytes-run
-  "A fresh Uint8Array of the bytes scalar whose varint starts at i of u8."
-  [^js u8 i]
+  "The eve binary (eve.bin) of the bytes scalar whose varint starts at i of u8: a view of u8 — no copy — when copy? is
+   false and u8 is the decode's own buffer, else of a copy made once (u8 views a domain's slab — a SharedArrayBuffer —
+   which this read holds no pin on: binary-native §2's escape rule)."
+  [^js u8 i copy?]
   (loop [i i v 0 sh 0]
     (let [x (aget u8 i) v (+ v (* (bit-and x 0x7F) (js/Math.pow 2 sh)))]
       (if (< x 0x80)
-        (.slice u8 (inc i) (+ (inc i) v))
+        (if (or copy? (and (exists? js/SharedArrayBuffer) (instance? js/SharedArrayBuffer (.-buffer u8))))
+          (ser/bin-view (.slice u8 (inc i) (+ (inc i) v)) 0 v)
+          (ser/bin-view u8 (inc i) v))
         (recur (inc i) v (+ sh 7))))))
 
 (defn- serialize-typed-array
@@ -726,6 +731,10 @@
           (bytes-run? elem)
           (serialize-bytes elem)
 
+          ;; an eve binary (eve.bin) — the same scalar
+          (ser/bin? elem)
+          (bin-bytes elem)
+
           ;; JS typed arrays — serialize as flat byte blob
           (some? (typed-array-subtype elem))
           (serialize-typed-array elem)
@@ -852,6 +861,10 @@
           ;; a run of bytes — the bytes scalar
           (bytes-run? elem)
           (serialize-bytes elem)
+
+          ;; an eve binary (eve.bin) — the same scalar
+          (ser/bin? elem)
+          (bin-bytes elem)
 
           ;; JS typed arrays — serialize as flat byte blob
           (some? (typed-array-subtype elem))
@@ -996,7 +1009,7 @@
               (.getFloat64 dv 3 true))
 
             (== tag FAST_TAG_BYTES)
-            (read-bytes-run bytes 3)
+            (read-bytes-run bytes 3 false)
 
             (== tag FAST_TAG_STRING_SHORT)
             (let [str-len (aget bytes 3)]
@@ -1246,7 +1259,7 @@
 
           ;; String — subarray view (no copy), TextDecoder
           (== tag FAST_TAG_BYTES)
-          (read-bytes-run (js/Uint8Array. (.-buffer dv) (.-byteOffset dv) (.-byteLength dv)) (+ off 3))
+          (read-bytes-run (js/Uint8Array. (.-buffer dv) (.-byteOffset dv) (.-byteLength dv)) (+ off 3) true)
 
           (== tag FAST_TAG_STRING_SHORT)
           (let [str-len (.getUint8 dv (+ off 3))

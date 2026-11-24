@@ -72,6 +72,9 @@ Added, from the unassigned range Eve reserves for itself (`0x00`, `0x20–0x3F`;
 | `0x00` | nil | 1 byte (Eve's nil is zero bytes, which a node cannot address) |
 | `0x28` | bytes | `[len varint][bytes]` — the scalar Eve lacks (A1) |
 
+What a `0x28` run reads back as — eve's binary value, a view of the run where it lies, with its `=`, hash, compare and
+signed reads — is [`BIN.md`](BIN.md) (`eve.bin`).
+
 Not carried, by the rule a disk domain already applies: a reference (`0x15`) — a fn, a regex, a host object. The
 writer refuses it by name (A12). A slab pointer tag (`0x10–0x13`, `0x19`, `0x1C–0x1F`, `0x40–0xEC`) never occurs in
 a packed chunk.

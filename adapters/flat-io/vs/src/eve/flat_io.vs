@@ -24,10 +24,10 @@
 ;; `key-cmp`'s full table, and the conformance test itself under VS (it needs this root on VS's classpath: eve's commit
 ;; plus the eve family's re-mint).
 ;;
-;; What the shared code needs beside this file (eve-side, with it): eve.flat.chunk's `host-bytes?` and the byte-array
-;; codec's take a `:vs` arm, `binary?` (today VS reads neither's: a binary packs as a 0x15 reference and is refused);
-;; chunk.cljc's `bytes-range` and `scalar-at` answer a binary for the 0x28 node; eve.encoding (adapters/encoding/vs)
-;; keeps the byte-array for the codec's own scratch buffers.
+;; A binary eve READS (the 0x28 scalar) is eve.bin's value (doc/flat/BIN.md), a view over the chunk its run lies in:
+;; on VS that chunk is a B1 binary, so eve.bin's reads are this root's u8 / bytes= / bytes-cmp over it. eve.encoding
+;; (adapters/encoding/vs) keeps the byte-array for the codec's own scratch buffers; a byte-array handed to `chunk` is
+;; copied once into a binary (B6 retires the byte-array emulation).
 (ns eve.flat-io
   (:refer-clojure :exclude [chunk tuple])
   (:require [eve.encoding :as enc]))

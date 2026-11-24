@@ -18,6 +18,7 @@
             [clojure.string :as str]
             [eve.hamt-util :as hu]
             [eve.codec :as codec]
+            [eve.bin :as bin]
             [eve.numeric :as num]
             [eve.deftype-proto.alloc :as alloc]))
 
@@ -141,9 +142,9 @@
   "Equality that holds a date by its time and NaN to itself."
   [a b]
   (cond
-    ;; a run of bytes (the bytes scalar): equal by its bytes
+    ;; a run of bytes (the bytes scalar): the decode is an eve binary (eve.bin) of the same bytes
     #?(:cljs (instance? js/Uint8Array a) :clj (bytes? a) :default false)
-    (= (bytes->hex a) (bytes->hex b))
+    (and (bin/bin? b) (= (bytes->hex a) (bytes->hex (bin/->bytes b))))
     (inst? a) (and (inst? b) (= #?(:squint (.getTime a) :default (inst-ms a))
                                 #?(:squint (.getTime b) :default (inst-ms b))))
     :else (= a b)))

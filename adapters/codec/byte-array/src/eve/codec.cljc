@@ -355,8 +355,9 @@
           0x17 (let [[n o] (read-twos b 3) [d _] (read-twos b o)] (enc/make-ratio n d))   ; TAG-RATIO
           0x18 (enc/make-bigdec (first (read-twos b 7)) (read-i32-le b 3))   ; TAG-BIGDEC
 
-          ;; a run of bytes (ser/FAST_TAG_BYTES): a fresh host byte array
-          0x28 (let [[n p] (read-varint b 3)] (enc/copy-of-range b p (+ p n)))
+          ;; a run of bytes (ser/FAST_TAG_BYTES): an eve binary viewing it in b, the bytes this decode was handed —
+          ;; no copy (eve.bin)
+          0x28 (let [[n p] (read-varint b 3)] (ser/bin-view b p n))
 
           ;; a reference (§9): the value this process's table names, or a refusal
           0x15 (ser/handle->ref (read-u32-le b 3) (read-u32-le b 7))   ; TAG-REF
@@ -740,6 +741,10 @@
     (host-bytes? v)
     (bytes->eve-bytes v)
 
+    ;; an eve binary (eve.bin): its scalar bytes, the run copied once
+    (ser/bin? v)
+    (ser/bin-scalar-bytes v)
+
     (map? v)
     (flat-map->eve-bytes v)
 
@@ -795,7 +800,7 @@
 
       (or (nil? v) (boolean? v) (integer? v) (float? v) (string? v)
           (keyword? v) (symbol? v) (enc/host-char? v)
-          (uuid? v) (enc/date? v) (enc/ratio? v) (enc/bigdec? v) (host-bytes? v))
+          (uuid? v) (enc/date? v) (enc/ratio? v) (enc/bigdec? v) (host-bytes? v) (ser/bin? v))
       (value->eve-bytes v)
 
       ;; A host value presenting an Eve value (babashka's map entry, a

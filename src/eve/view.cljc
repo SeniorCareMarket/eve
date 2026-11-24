@@ -31,7 +31,8 @@
             ;; bundle orders by requires; eve.deftype-guard-test's reader-registration-load-order)
             [eve.type-readers]
             [eve.core :as e]
-            [eve.gc :as gc]))
+            [eve.gc :as gc]
+            [eve.bin :as bin]))
 
 ;; ---------------------------------------------------------------------------
 ;; the read's cell: holds the pin's release; collected with the last view
@@ -397,6 +398,9 @@
   [x cell]
   (cond
     (scalar? x) x
+    ;; a binary viewing the pinned block (eve.bin): it holds the read's cell, as a view does — or, on a host whose GC
+    ;; cannot end a read (read-end C: no pin outlives the access), it is copied once
+    (bin/bin? x) (if (bin/slab-view? x) (if (available?) (bin/pinned x cell) (bin/own x)) x)
     (not (slab? x)) x
     (sister-desc x) (deftype-view x (sister-desc x) cell)
     (map? x) (ViewMap. x cell (volatile! nil))
@@ -411,7 +415,7 @@
   [raw ctx]
   (let [[cell release-now] (cell-for ctx)
         v (wrap raw cell)]
-    (when-not (or (view? v) (satisfies? source/ISister v))
+    (when-not (or (view? v) (satisfies? source/ISister v) (and (bin/bin? v) (some? (bin/pin-of v))))
       (release-now))
     v))
 
