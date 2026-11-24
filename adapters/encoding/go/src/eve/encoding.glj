@@ -182,9 +182,22 @@
   (char? v))
 
 (defn host-array?
-  "A host array (a Go slice: glojure's arrays are slices)."
+  "A host typed array with an Eve element subtype (byte/short/int/float/double).
+   Object arrays ([]interface {}) and string arrays ([]string) have no
+   typed-array image: the codec keeps them as process-local references,
+   just like other opaque host objects (the same contract as the JVM
+   encoding; measured: eve.reference-tag-test/object-arrays-remain-references
+   died at write-host-array!, 2026-11-24 ET)."
   [v]
-  (eveglj:host.IsArray v))
+  ;; Inline the typed-array classes: glojure compiles this file as Go and
+  ;; cannot resolve array-subtype+bytes when this defn sits above it
+  ;; (measured: "unable to resolve symbol: array-subtype+bytes" at
+  ;; host-array? from eve.codec write-arr!, 2026-11-24 ET).
+  (or (instance? (class (clojure.core/int-array 0)) v)
+      (instance? (class (clojure.core/double-array 0)) v)
+      (instance? (class (clojure.core/float-array 0)) v)
+      (instance? (class (clojure.core/short-array 0)) v)
+      (instance? (class (clojure.core/byte-array 0)) v)))
 
 (defn new-cache
   "A concurrent map for small caches (cache-get / cache-put!): an atom of a map."
@@ -291,6 +304,13 @@
     (instance? (class (clojure.core/short-array 0)) a) [4 (eveglj:host.I16sToBytesLE a)]
     (instance? (class (clojure.core/byte-array 0)) a) [2 a]
     :else nil))
+
+(defn host-object-array?
+  "A Go slice or array that is not an Eve numeric typed array: []interface {},
+   []string, and kin. Used by eve.flat.chunk/host-object-array? (no
+   Class/forName on this host)."
+  [v]
+  (boolean (and (some? v) (eveglj:host.IsArray v) (nil? (array-subtype+bytes v)))))
 
 ;; The host's own typed arrays, which a fresh eve array is on a host that has them (eve.array's heap arrays):
 ;; glojure's arrays

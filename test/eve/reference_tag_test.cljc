@@ -108,6 +108,13 @@
      (doseq [v [(to-array [1 "two" nil]) (into-array String ["one" "two"])]]
        (is (identical? v (round-trip v)))
        (is (identical? v (e/get (in-map :v v) :v)))))
+   :glj
+   ;; :clj is not a glojure feature, so the :clj arm below does not load.
+   ;; to-array / into-array String are []interface {} and []string here.
+   (deftest object-arrays-remain-references
+     (doseq [v [(to-array [1 "two" nil]) (into-array String ["one" "two"])]]
+       (is (identical? v (round-trip v)))
+       (is (identical? v (e/get (in-map :v v) :v)))))
    :clj
    (deftest object-arrays-remain-references
      (doseq [v [(to-array [1 "two" nil]) (into-array String ["one" "two"])]]

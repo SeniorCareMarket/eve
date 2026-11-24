@@ -407,7 +407,10 @@
    (they read :clj but have no top-level object-array-class)."
   [x]
   #?(:jank (instance? (Class/forName "[Ljava.lang.Object;") x)
-     :glj (instance? (Class/forName "[Ljava.lang.Object;") x)
+     ;; glojure has no Class/forName (EvalASTMaybeHostForm, measured:
+     ;; eve.record-test / eve.flat.chunk to-rep, 2026-11-24 ET). Object
+     ;; and string slices are IsArray and have no numeric subtype.
+     :glj (enc/host-object-array? x)
      :clj (instance? object-array-class x)
      :cljs (array? x)
      :default false))
