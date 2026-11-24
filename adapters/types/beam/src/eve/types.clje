@@ -158,8 +158,18 @@
            (proto 'clojerl.ISeqable
                   (as 'seq (one 'seq))
                   (when (one 'seq)
-                    ;; through into: a seq's seq is itself, whose to_list this is
-                    {:name 'to_list :args '[this] :body '[(clj_rt/to_list (clojure.core/into [] this))]}))
+                    ;; Walk first/next into a list. Do not use (into [] this):
+                    ;; that reduces via nth (ci-reduce) on a counted vector,
+                    ;; and a seq's seq is itself so to_list cannot recurse
+                    ;; through seq. Hash of a 310k RRB vector was 31 s vs
+                    ;; 0.7 s for a first/next walk (test-splicing).
+                    {:name 'to_list :args '[this]
+                     :body '[(clj_rt/to_list
+                               (loop [s (clojure.core/seq this) acc ()]
+                                 (if s
+                                   (recur (clojure.core/next s)
+                                          (clojure.core/cons (clojure.core/first s) acc))
+                                   (clojure.core/reverse acc))))]}))
            (proto 'clojerl.IEquiv (as 'equiv (or (one 'equiv) (one 'equals))))
            (proto 'clojerl.IHash (as 'hash (or (one 'hasheq) (one 'hashCode))))
            (proto 'clojerl.IMeta (as 'meta (one 'meta)) (as 'with_meta (one 'withMeta)))
