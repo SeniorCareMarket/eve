@@ -91,6 +91,16 @@
               (doseq [i (range (min (int size) (count init)))]
                 (clojure.core/aset a i (clojure.core/byte (nth init i))))
               a))
+      ;; ClojureCLR's reader takes :cljr (same :default trap as :lg):
+      ;; java.util.Arrays/fill does not exist, TypeNotFoundException at
+      ;; compile (bb test:cljr, 2026-11-23).
+      :cljr (let [a (clojure.core/byte-array (int size))]
+              (if (number? init)
+                (doseq [i (range (int size))]
+                  (clojure.core/aset a i (clojure.core/byte init)))
+                (doseq [i (range (min (int size) (count init)))]
+                  (clojure.core/aset a i (clojure.core/byte (nth init i)))))
+              a)
       :default (let [a (clojure.core/byte-array (int size))]
                  (if (number? init)
                    (java.util.Arrays/fill a (clojure.core/byte init))

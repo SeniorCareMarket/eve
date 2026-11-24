@@ -23,6 +23,7 @@
             ["node:worker_threads" :as wt]
             [cljs.reader :as reader]
             [clojure.string :as str]
+            [eve.flat.chunk :as chunk]
             [eve.wire :as wire]))
 
 ;; The doorbell: one Int32Array over a SharedArrayBuffer every thread holds.
@@ -113,6 +114,52 @@
   (try (reader/read-string m)
        (catch :default _ (throw (ex-info (str "eve.thread-host: unreadable message: " (subs m 0 (min 400 (count m)))) {})))))
 
+(defn- wire-bytes?
+  "A posted eve.wire chunk: a Uint8Array, or an ArrayBuffer after a structured clone."
+  [m]
+  (or (instance? js/Uint8Array m)
+      (instance? js/ArrayBuffer m)))
+
+(defn- as-u8 [m]
+  (if (instance? js/Uint8Array m) m (js/Uint8Array. m)))
+
+(defn- port-handoff?
+  "A MessagePort handed over for a new peer ({:peer id :port p}), not data."
+  [m]
+  (and (some? m)
+       (not (string? m))
+       (not (wire-bytes? m))
+       (some? (.-port m))
+       (fn? (.-postMessage (.-port m)))))
+
+(defn- host-edn
+  "wire/decode answers a flat handle (a FlatMap, a FlatList, a keyword
+   from the chunk's symbol table). ClojureScript's `case` compiles to
+   `instanceof cljs.core.Keyword` then `.fqn`, so a keyword that only
+   `=` a cljs keyword does not dispatch (the conformance echo-loop
+   would never reply). nbb/SCI cannot invoke a FlatList as a form.
+   Unpack, then walk to interned host keywords/symbols and plain
+   collections, as pr-str / read-string did before eve.wire."
+  [v]
+  (let [v (if (chunk/flat-handle? v) (chunk/unpack v) v)]
+    (cond
+      (keyword? v) (keyword (namespace v) (name v))
+      (symbol? v) (symbol (namespace v) (name v))
+      (map? v) (into {} (map (fn [[k x]] [(host-edn k) (host-edn x)]) v))
+      (vector? v) (mapv host-edn v)
+      (set? v) (into #{} (map host-edn) v)
+      (seq? v) (doall (map host-edn v))
+      :else v)))
+
+(defn- decode-data
+  "A data message on a port: eve.wire bytes, or a leftover EDN string."
+  [m]
+  (cond
+    (wire-bytes? m) (host-edn (wire/decode (as-u8 m)))
+    (string? m) (read-message m)
+    :else (throw (ex-info "eve.thread-host: unexpected port message"
+                          {:class (if m (.-constructor.name m) "nil")}))))
+
 (defn- drain-ports!
   "Every message waiting on every port: a port handed over for a new peer is installed, data is queued locally (in
    each port's order)."
@@ -121,11 +168,9 @@
     (let [got (reduce (fn [got p]
                         (if-let [r (wt/receiveMessageOnPort p)]
                           (let [m (.-message r)]
-                            (cond
-                              ;; data: eve.wire bytes (one flat chunk)
-                              (instance? js/Uint8Array m) (swap! state update :local conj (wire/decode m))
-                              (string? m) (swap! state update :local conj (read-message m))
-                              :else (install! (.-peer m) (.-port m)))
+                            (if (port-handoff? m)
+                              (install! (.-peer m) (.-port m))
+                              (swap! state update :local conj (decode-data m)))
                             true)
                           got))
                       false (vals (:ports @state)))]
@@ -178,8 +223,8 @@
                             (do (swap! state assoc :rr (inc k)) (.-message r))
                             (recur (inc i))))))]
             (cond
-              (and hit (not (string? hit))) (do (install! (.-peer hit) (.-port hit)) (recur))
-              hit (read-message hit)
+              (port-handoff? hit) (do (install! (.-peer hit) (.-port hit)) (recur))
+              hit (decode-data hit)
               (zero? ms) :eve.thread/timeout
               :else (let [left (if deadline (- deadline (js/Date.now)) js/Infinity)]
                       (if (<= left 0)

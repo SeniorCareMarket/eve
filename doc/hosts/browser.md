@@ -33,21 +33,21 @@ a browser (they run on Node; a page has no disk domain).
 <!-- perf:browser (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 17.9 µs | 65536 | 1.4 |
-| `atom-deref-small` | 2.8 µs | 524288 | 1.0 |
-| `atom-swap-map-1k` | 7.0 µs | 262144 | 1.7 |
-| `atom-deref-map-1k` | 2.5 µs | 524288 | 1.1 |
-| `atom-$-get-map-1k` | 2.9 µs | 524288 | 4.9 |
-| `atom-reset-vec-1k` | 6.6 ms | 256 | 5.6 |
-| `sorted-set-build-200` | 14.6 ms | 128 | 2.9 |
+| `atom-swap-counter` | 18.6 µs | 65536 | 1.6 |
+| `atom-deref-small` | 3.0 µs | 524288 | 1.0 |
+| `atom-swap-map-1k` | 6.9 µs | 262144 | 1.7 |
+| `atom-deref-map-1k` | 2.5 µs | 524288 | 0.9 |
+| `atom-$-get-map-1k` | 2.8 µs | 524288 | 4.9 |
+| `atom-reset-vec-1k` | 6.4 ms | 256 | 4.3 |
+| `sorted-set-build-200` | 14.6 ms | 128 | 2.7 |
 | `disk-swap-counter` | n/a | — | — |
-| `thread-submit-64` | 125.9 ms | 8 | 41 |
+| `thread-submit-64` | 140.0 ms | 8 | 55 |
 
-Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s. `disk-swap-counter` is n/a (no disk domains in a browser page).
+Measured 2026-11-23 10:39–10:41 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `f329fc4` plus the thread-host wire-decode fix, by `bb scripts/perf-all.clj`, one host at a time, load1 3.77; a round of at least 1 s. `disk-swap-counter` is n/a (no disk domains in a browser page). `thread-submit-64` was 3.3 ms on this box at `77b649aa5` (2026-10-21, load1 1.52) and 125.9 ms on `507235b` after `70e6f4c8` (eve.wire on the SAB ring).
 <!-- /perf:browser -->
 
-Reading it: a small deref 2.8 µs, within noise of the JVM's 2.7 µs, and within ~1.4–1.7× of the JVM on swaps. No disk
-domains in a page. 64 tasks to the page's workers: 125.9 ms in this run.
+Reading it: a small deref 3.0 µs, within noise of the JVM's 2.9 µs, and within ~1.6–1.7× of the JVM on swaps. No disk
+domains in a page. 64 tasks to the page's workers: 140.0 ms in this run (3.3 ms at `77b649aa5` on this box).
 
 What sets a page's numbers: the same compiled ClojureScript as Node, on the same V8, with the module slab in each
 worker; a network atom from a browser is bound by the browser's six connections per origin (a cold deref of ~1,100

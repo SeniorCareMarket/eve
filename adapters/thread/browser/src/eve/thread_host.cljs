@@ -27,6 +27,7 @@
    entry returns or throws; the Worker's error event (on the page's event loop) is the backstop."
   (:require [cljs.reader :as reader]
             [eve.wire :as wire]
+            [eve.flat.chunk :as chunk]
             [clojure.string :as str]))
 
 ;; The mailboxes: a ring of RING bytes for each of MAX threads, and the page's spawn ring (SPAWN), after a control
@@ -127,6 +128,23 @@
       (.set out (.subarray bytes base (+ base (- n first-n))) first-n))
     out))
 
+(defn- host-edn
+  "wire/decode answers a flat handle. ClojureScript's `case` compiles to
+   `instanceof cljs.core.Keyword` then `.fqn`; nbb/SCI cannot invoke a
+   FlatList as a form. Unpack, then walk to interned host
+   keywords/symbols and plain collections, as pr-str / read-string did
+   before eve.wire."
+  [v]
+  (let [v (if (chunk/flat-handle? v) (chunk/unpack v) v)]
+    (cond
+      (keyword? v) (keyword (namespace v) (name v))
+      (symbol? v) (symbol (namespace v) (name v))
+      (map? v) (into {} (map (fn [[k x]] [(host-edn k) (host-edn x)]) v))
+      (vector? v) (mapv host-edn v)
+      (set? v) (into #{} (map host-edn) v)
+      (seq? v) (doall (map host-edn v))
+      :else v)))
+
 (defn- put! [id payload]
   (let [{:keys [ctl bytes]} (mem)
         n (.-length payload)
@@ -160,7 +178,7 @@
             bs (get-bytes bytes id (+ head 4) n)]
         (js/Atomics.store ctl (head-word id) (bit-or (+ head (* 4 (js/Math.ceil (/ (+ 4 n) 4)))) 0))
         ;; eve.wire bytes (one flat chunk), copied out of the ring
-        (wire/decode bs)))))
+        (host-edn (wire/decode bs))))))
 
 (defn send!
   "Write msg into the mailbox of the thread at addr (to oneself: onto this thread's own queue); never blocks. A message

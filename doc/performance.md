@@ -50,37 +50,37 @@ resolve symbol: long`.
 | disk-swap-counter | 67,321 |
 | thread-submit-64 | 2,529,296 |
 
-### ClojureScript (node) — J, 21:00–21:01 ET, exit 0, 46 s wall, load1 1.76→2.80
+### ClojureScript (node) — J, 22:39–22:41 ET, exit 0, 46 s wall, load1 3.77→4.24
 
-`thread-submit-64` is n/a: `The "port" argument must be a MessagePort instance`.
-
-| workload | ns/op |
-|---|---:|
-| atom-swap-counter | 41,595 |
-| atom-deref-small | 4,196 |
-| atom-swap-map-1k | 13,946 |
-| atom-deref-map-1k | 4,417 |
-| atom-$-get-map-1k | 6,309 |
-| atom-reset-vec-1k | 12,234,375 |
-| sorted-set-build-200 | 29,187,500 |
-| disk-swap-counter | 182,128 |
-| thread-submit-64 | n/a |
-
-### browser — J, 21:01–21:02 ET, exit 0, 49 s wall, load1 2.80→2.50
-
-`disk-swap-counter` is n/a (`require is not defined` — no disk domains in a page).
+`thread-submit-64` now runs (it failed on `507235b` with a MessagePort error).
 
 | workload | ns/op |
 |---|---:|
-| atom-swap-counter | 17,898 |
-| atom-deref-small | 2,756 |
-| atom-swap-map-1k | 7,019 |
-| atom-deref-map-1k | 2,517 |
-| atom-$-get-map-1k | 2,931 |
-| atom-reset-vec-1k | 6,609,375 |
-| sorted-set-build-200 | 14,570,312 |
+| atom-swap-counter | 42,541 |
+| atom-deref-small | 4,783 |
+| atom-swap-map-1k | 15,319 |
+| atom-deref-map-1k | 5,580 |
+| atom-$-get-map-1k | 6,713 |
+| atom-reset-vec-1k | 11,968,750 |
+| sorted-set-build-200 | 31,906,250 |
+| disk-swap-counter | 187,255 |
+| thread-submit-64 | 62,812,500 |
+
+### browser — J, 22:39–22:41 ET, exit 0, 45 s wall, load1 3.77→4.24
+
+`disk-swap-counter` is n/a (`require is not defined` — no disk domains in a page). `thread-submit-64` was 3,251,953 ns/op on this box at `77b649aa5` (2026-10-21, load1 1.52).
+
+| workload | ns/op |
+|---|---:|
+| atom-swap-counter | 18,569 |
+| atom-deref-small | 2,954 |
+| atom-swap-map-1k | 6,908 |
+| atom-deref-map-1k | 2,477 |
+| atom-$-get-map-1k | 2,834 |
+| atom-reset-vec-1k | 6,437,500 |
+| sorted-set-build-200 | 14,554,687 |
 | disk-swap-counter | n/a |
-| thread-submit-64 | 125,875,000 |
+| thread-submit-64 | 140,000,000 |
 
 ### babashka — J, 21:02–21:02 ET, exit 0, 31 s wall, load1 2.50→1.91
 
@@ -110,21 +110,21 @@ resolve symbol: long`.
 | disk-swap-counter | 2,347,656 |
 | thread-submit-64 | 2,486,328 |
 
-### nbb — J, 21:03–21:03 ET, exit 0, 33 s wall, load1 1.57→2.81
+### nbb — J, 22:39–22:41 ET, exit 0, 39 s wall, load1 3.77→4.24
 
-`thread-submit-64` is n/a: same `MessagePort` error as ClojureScript.
+`thread-submit-64` now runs (same MessagePort fix as ClojureScript).
 
 | workload | ns/op |
 |---|---:|
-| atom-swap-counter | 535,644 |
-| atom-deref-small | 21,423 |
-| atom-swap-map-1k | 135,375 |
-| atom-deref-map-1k | 24,627 |
-| atom-$-get-map-1k | 55,236 |
-| atom-reset-vec-1k | 85,437,500 |
-| sorted-set-build-200 | 193,500,000 |
-| disk-swap-counter | 1,286,132 |
-| thread-submit-64 | n/a |
+| atom-swap-counter | 545,898 |
+| atom-deref-small | 23,300 |
+| atom-swap-map-1k | 135,131 |
+| atom-deref-map-1k | 25,924 |
+| atom-$-get-map-1k | 48,828 |
+| atom-reset-vec-1k | 85,687,500 |
+| sorted-set-build-200 | 193,125,000 |
+| disk-swap-counter | 1,232,421 |
+| thread-submit-64 | 247,625,000 |
 
 ### basilisp (lpy) — J, 21:03–21:06 ET, exit 0, 172 s wall, load1 2.81→1.30
 
@@ -230,11 +230,14 @@ these write shapes, at this pin.
 
 ## 5. Gaps, named
 
-- **ClojureCLR host suite** — no `.NET` / `cljr` on this box.
+- **ClojureCLR host suite** — .NET 8.0.428 and Clojure.Main 1.12.6 are
+  installed; `bb test:cljr` dies at compile (`eve/flat_io.cljc:308`,
+  `Unable to resolve symbol: u8`).
 - **clojerl host suite** — compile fails at `eve/flat_io.cljc:304`
   (`Unable to resolve symbol: long`), twice, same error.
-- **cljs / nbb `thread-submit-64`** — n/a,
-  `The "port" argument must be a MessagePort instance`.
+- **browser `thread-submit-64`** — 140.0 ms on this tree; 3.3 ms on
+  this box at `77b649aa5`. The jump is `70e6f4c8` (eve.wire on the SAB
+  ring), not the MessagePort bug, which was cljs/nbb only and is fixed.
 - **browser `disk-swap-counter`** — n/a (no disk domains in a page).
 - **Startup shootout, hosts other than JVM source-form** — not re-run
   at this pin.

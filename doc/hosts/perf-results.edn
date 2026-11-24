@@ -39,21 +39,21 @@
   :browser
   {:host :browser,
    :exit 0,
-   :wall-s 48,
+   :wall-s 45,
    :lines
-   [{:ms 1173, :ops 65536, :perf :atom-swap-counter, :ns-per-op 17898}
-    {:ms 1445, :ops 524288, :perf :atom-deref-small, :ns-per-op 2756}
-    {:ms 1840, :ops 262144, :perf :atom-swap-map-1k, :ns-per-op 7019}
-    {:ms 1320, :ops 524288, :perf :atom-deref-map-1k, :ns-per-op 2517}
-    {:ms 1537, :ops 524288, :perf :atom-$-get-map-1k, :ns-per-op 2931}
-    {:ms 1692, :ops 256, :perf :atom-reset-vec-1k, :ns-per-op 6609375}
-    {:ms 1865,
+   [{:ms 1217, :ops 65536, :perf :atom-swap-counter, :ns-per-op 18569}
+    {:ms 1549, :ops 524288, :perf :atom-deref-small, :ns-per-op 2954}
+    {:ms 1811, :ops 262144, :perf :atom-swap-map-1k, :ns-per-op 6908}
+    {:ms 1299, :ops 524288, :perf :atom-deref-map-1k, :ns-per-op 2477}
+    {:ms 1486, :ops 524288, :perf :atom-$-get-map-1k, :ns-per-op 2834}
+    {:ms 1648, :ops 256, :perf :atom-reset-vec-1k, :ns-per-op 6437500}
+    {:ms 1863,
      :ops 128,
      :perf :sorted-set-build-200,
-     :ns-per-op 14570312}
+     :ns-per-op 14554687}
     {:perf :disk-swap-counter, :error "require is not defined"}
-    {:ms 1007, :ops 8, :perf :thread-submit-64, :ns-per-op 125875000}],
-   :at "2026-11-24T02:02:20.090746462Z"},
+    {:ms 1120, :ops 8, :perf :thread-submit-64, :ns-per-op 140000000}],
+   :at "2026-11-24T03:41:35.242844469Z"},
   :lpy
   {:host :lpy,
    :exit 0,
@@ -138,38 +138,36 @@
   :nbb
   {:host :nbb,
    :exit 0,
-   :wall-s 33,
+   :wall-s 39,
    :lines
-   [{:perf :atom-swap-counter, :ops 2048, :ms 1097, :ns-per-op 535644}
-    {:perf :atom-deref-small, :ops 65536, :ms 1404, :ns-per-op 21423}
-    {:perf :atom-swap-map-1k, :ops 8192, :ms 1109, :ns-per-op 135375}
-    {:perf :atom-deref-map-1k, :ops 65536, :ms 1614, :ns-per-op 24627}
-    {:perf :atom-$-get-map-1k, :ops 32768, :ms 1810, :ns-per-op 55236}
-    {:perf :atom-reset-vec-1k, :ops 16, :ms 1367, :ns-per-op 85437500}
+   [{:perf :atom-swap-counter, :ops 2048, :ms 1118, :ns-per-op 545898}
+    {:perf :atom-deref-small, :ops 65536, :ms 1527, :ns-per-op 23300}
+    {:perf :atom-swap-map-1k, :ops 8192, :ms 1107, :ns-per-op 135131}
+    {:perf :atom-deref-map-1k, :ops 65536, :ms 1699, :ns-per-op 25924}
+    {:perf :atom-$-get-map-1k, :ops 32768, :ms 1600, :ns-per-op 48828}
+    {:perf :atom-reset-vec-1k, :ops 16, :ms 1371, :ns-per-op 85687500}
     {:perf :sorted-set-build-200,
      :ops 8,
-     :ms 1548,
-     :ns-per-op 193500000}
-    {:perf :disk-swap-counter, :ops 1024, :ms 1317, :ns-per-op 1286132}
-    {:perf :thread-submit-64,
-     :error "The \"port\" argument must be a MessagePort instance"}],
-   :at "2026-11-24T02:03:57.812732566Z"},
+     :ms 1545,
+     :ns-per-op 193125000}
+    {:perf :disk-swap-counter, :ops 1024, :ms 1262, :ns-per-op 1232421}
+    {:perf :thread-submit-64, :ops 8, :ms 1981, :ns-per-op 247625000}],
+   :at "2026-11-24T03:41:35.242843477Z"},
   :cljs
   {:host :cljs,
    :exit 0,
    :wall-s 46,
    :lines
-   [{:perf :atom-swap-counter, :ops 32768, :ms 1363, :ns-per-op 41595}
-    {:perf :atom-deref-small, :ops 262144, :ms 1100, :ns-per-op 4196}
-    {:perf :atom-swap-map-1k, :ops 131072, :ms 1828, :ns-per-op 13946}
-    {:perf :atom-deref-map-1k, :ops 262144, :ms 1158, :ns-per-op 4417}
-    {:perf :atom-$-get-map-1k, :ops 262144, :ms 1654, :ns-per-op 6309}
-    {:perf :atom-reset-vec-1k, :ops 128, :ms 1566, :ns-per-op 12234375}
+   [{:perf :atom-swap-counter, :ops 32768, :ms 1394, :ns-per-op 42541}
+    {:perf :atom-deref-small, :ops 262144, :ms 1254, :ns-per-op 4783}
+    {:perf :atom-swap-map-1k, :ops 65536, :ms 1004, :ns-per-op 15319}
+    {:perf :atom-deref-map-1k, :ops 262144, :ms 1463, :ns-per-op 5580}
+    {:perf :atom-$-get-map-1k, :ops 262144, :ms 1760, :ns-per-op 6713}
+    {:perf :atom-reset-vec-1k, :ops 128, :ms 1532, :ns-per-op 11968750}
     {:perf :sorted-set-build-200,
      :ops 64,
-     :ms 1868,
-     :ns-per-op 29187500}
-    {:perf :disk-swap-counter, :ops 8192, :ms 1492, :ns-per-op 182128}
-    {:perf :thread-submit-64,
-     :error "The \"port\" argument must be a MessagePort instance"}],
-   :at "2026-11-24T02:01:31.846928836Z"}}}
+     :ms 2042,
+     :ns-per-op 31906250}
+    {:perf :disk-swap-counter, :ops 8192, :ms 1534, :ns-per-op 187255}
+    {:perf :thread-submit-64, :ops 32, :ms 2010, :ns-per-op 62812500}],
+   :at "2026-11-24T03:41:35.242801094Z"}}}
