@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Fixed (clojerl): `eve.crypto` resolves once.** clojerl refuses a namespace found twice on its code path, and the
+  `:clje` roots held both `adapters/crypto/beam/src/eve/crypto.clje` and the portable `eve/crypto.cljc`
+  (`Found more than one eve/crypto`), so nothing requiring `eve.crypto` loaded on clje (eve.keyring, eve.db.ds).
+  `:clje` now takes `adapters/crypto/portable-clje/src`, whose `eve/net` links to the portable `eve.net.*` code; every
+  other host's roots are unchanged.
+
 - **Fixed (glojure): `eve.uuid` loads.** A decimal 64-bit string's leading zeros were stripped with a lookahead regex
   (`#"^0+(?=.)"`), which Go's regexp rejects at read time (`invalid or unsupported Perl syntax: (?=`), so glojure
   could not load `eve.uuid` or anything requiring it (eve.db.ds). It strips with `#"^0+"` and keeps one digit.

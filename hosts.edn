@@ -82,7 +82,11 @@
         "adapters/core/clojure/src" "adapters/completion/jolt/src" "adapters/coll/jvm/src" "adapters/slab/heap/src" "adapters/region/jolt-ffi/src"
         "adapters/encoding/jolt/src" "adapters/int32/jolt/src" "adapters/codec/byte-array/src" "adapters/process/jolt/src" "adapters/gc/jolt/src" "adapters/thread/jvm/src"
         "adapters/types/jvm/src" "adapters/types/js/src" "adapters/http-server/jolt/src" "adapters/flat-io/portable/src"]
- :clje ["apps/network-atoms/src" "adapters/slab-io/protocol/src" "adapters/http/beam/src" "adapters/crypto/beam/src" "adapters/crypto/portable/src"
+;; :clje takes adapters/crypto/portable-clje/src, not crypto/portable/src: clojerl refuses a namespace found twice on
+;; its code path (clj_rt.erl resolve_file: "Found more than one eve/crypto"), and portable/src holds a portable
+;; eve/crypto.cljc beside the eve.net.* code beam's crypto.clje requires. portable-clje/src/eve/net is a symlink to
+;; portable/src/eve/net, so clje loads the same eve.net.* files and only beam's eve.crypto.
+ :clje ["apps/network-atoms/src" "adapters/slab-io/protocol/src" "adapters/http/beam/src" "adapters/crypto/beam/src" "adapters/crypto/portable-clje/src"
         "adapters/core/beam/src" "adapters/completion/clojerl/src" "adapters/coll/beam/src" "adapters/slab/heap/src" "adapters/region/beam/src"
         "adapters/encoding/beam/src" "adapters/int32/portable/src" "adapters/codec/byte-array/src" "adapters/process/beam/src" "adapters/gc/beam/src" "adapters/thread/beam/src"
         "adapters/types/beam/src" "adapters/http-server/beam/src" "adapters/flat-io/portable/src"]
