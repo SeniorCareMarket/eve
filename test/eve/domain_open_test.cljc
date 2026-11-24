@@ -122,6 +122,7 @@
          :clje nil
          :lpy nil
          :cljr nil
+         :glj nil
          :default
          (let [before (:pins (live))
                ready (java.util.concurrent.CountDownLatch. 1)
