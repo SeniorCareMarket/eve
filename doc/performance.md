@@ -1,16 +1,19 @@
-# Performance — Eve `507235b`
+# Performance — Eve `f329fc4`
 
-What this pin measures, where users look. Every cell below is a
+What this document measures, where users look. Every cell below is a
 measured number with its box and pin label, or it is marked **GAPPED**
 or **n/a** with the reason — none is estimated, and no older number is
 carried forward as if it were new. Sections carry their own
 provenance: runs are never blended across boxes, pins, or days.
 
-This record was measured on J (Linux x86_64, Temurin 21.0.13, jolt
-v0.8.28, bb 1.13.226, Node 24.22.1, Basilisp 0.5.1) on 2026-11-23
-against Eve `507235b` (PR #44's jlog journal on main). load1 is
-recorded with every host. Older records, including the 0.9.3.1 and
-0.9.3.2 Mac tables, stand in this file's git history.
+The JVM and jolt suite rows were re-run on J (Linux x86_64, Temurin
+21.0.13, jolt v0.8.28, bb 1.13.226, Node 24.22.1, Basilisp 0.5.1) on
+2026-11-23 22:42–22:43 ET against Eve `f329fc4` (the jolt parity
+view-pin fix on main), load1 2.63→2.40. The other host suite rows
+remain the 2026-11-23 20:53–21:08 ET run on the same box against Eve
+`507235b` (PR #44's jlog journal on main). load1 is recorded with
+every host. Older records, including the 0.9.3.1 and 0.9.3.2 Mac
+tables, stand in this file's git history.
 
 Measurement discipline: performance measures the operation, not
 compilation — benches run each host's compiled form, and compile time
@@ -33,19 +36,19 @@ PersistentIntMap was removed. The cross-host table is in
 `adapters/flat-io/portable/src/eve/flat_io.cljc:304:13: Unable to
 resolve symbol: long`.
 
-### JVM — J, 2026-11-23 20:53–20:54 ET, exit 0, 33 s wall, load1 2.61→2.82
+### JVM — J, 2026-11-23 22:42:07–22:42:37 ET, exit 0, 30 s wall, load1 2.63→3.00, Eve `f329fc4`
 
 | workload | ns/op |
 |---|---:|
-| atom-swap-counter | 12,786 |
-| atom-deref-small | 2,723 |
-| atom-swap-map-1k | 4,196 |
-| atom-deref-map-1k | 2,271 |
-| atom-$-get-map-1k | 603 |
-| atom-reset-vec-1k | 1,186,523 |
-| sorted-set-build-200 | 4,984,375 |
-| disk-swap-counter | 61,828 |
-| thread-submit-64 | 3,054,687 |
+| atom-swap-counter | 11,436 |
+| atom-deref-small | 2,906 |
+| atom-swap-map-1k | 4,104 |
+| atom-deref-map-1k | 2,740 |
+| atom-$-get-map-1k | 582 |
+| atom-reset-vec-1k | 1,483,398 |
+| sorted-set-build-200 | 5,300,781 |
+| disk-swap-counter | 67,321 |
+| thread-submit-64 | 2,529,296 |
 
 ### ClojureScript (node) — J, 21:00–21:01 ET, exit 0, 46 s wall, load1 1.76→2.80
 
@@ -137,19 +140,19 @@ resolve symbol: long`.
 | disk-swap-counter | 17,234,375 |
 | thread-submit-64 | 125,250,000 |
 
-### jolt — J, 21:06–21:07 ET, exit 0, 28 s wall, load1 1.30→1.20
+### jolt — J, 2026-11-23 22:42:37–22:43:06 ET, exit 0, 29 s wall, load1 3.00→2.40, Eve `f329fc4`
 
 | workload | ns/op |
 |---|---:|
-| atom-swap-counter | 15,869 |
-| atom-deref-small | 1,662 |
-| atom-swap-map-1k | 6,732 |
-| atom-deref-map-1k | 1,622 |
-| atom-$-get-map-1k | 782 |
-| atom-reset-vec-1k | 3,681,640 |
-| sorted-set-build-200 | 10,359,375 |
-| disk-swap-counter | 139,038 |
-| thread-submit-64 | 4,519,531 |
+| atom-swap-counter | 13,786 |
+| atom-deref-small | 1,543 |
+| atom-swap-map-1k | 6,893 |
+| atom-deref-map-1k | 1,615 |
+| atom-$-get-map-1k | 587 |
+| atom-reset-vec-1k | 3,572,265 |
+| sorted-set-build-200 | 10,687,500 |
+| disk-swap-counter | 153,076 |
+| thread-submit-64 | 5,539,062 |
 
 ### glojure — J, 21:07–21:08 ET, exit 0, 74 s wall, load1 2.13→2.06
 

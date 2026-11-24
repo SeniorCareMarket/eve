@@ -39,22 +39,22 @@ namespace babashka's runner runs, jolt's runs.
 <!-- perf:jolt (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 15.9 µs | 65536 | 1.2 |
-| `atom-deref-small` | 1.7 µs | 1048576 | 0.61 |
-| `atom-swap-map-1k` | 6.7 µs | 262144 | 1.6 |
-| `atom-deref-map-1k` | 1.6 µs | 1048576 | 0.71 |
-| `atom-$-get-map-1k` | 0.8 µs | 2097152 | 1.3 |
-| `atom-reset-vec-1k` | 3.7 ms | 512 | 3.1 |
-| `sorted-set-build-200` | 10.4 ms | 128 | 2.1 |
-| `disk-swap-counter` | 139.0 µs | 8192 | 2.2 |
-| `thread-submit-64` | 4.5 ms | 256 | 1.5 |
+| `atom-swap-counter` | 13.8 µs | 131072 | 1.2 |
+| `atom-deref-small` | 1.5 µs | 1048576 | 0.53 |
+| `atom-swap-map-1k` | 6.9 µs | 262144 | 1.7 |
+| `atom-deref-map-1k` | 1.6 µs | 1048576 | 0.59 |
+| `atom-$-get-map-1k` | 0.6 µs | 2097152 | 1.0 |
+| `atom-reset-vec-1k` | 3.6 ms | 512 | 2.4 |
+| `sorted-set-build-200` | 10.7 ms | 128 | 2.0 |
+| `disk-swap-counter` | 153.1 µs | 8192 | 2.3 |
+| `thread-submit-64` | 5.5 ms | 256 | 2.2 |
 
-Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
+Measured 2026-11-23 10:42–10:43 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `f329fc4` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
 <!-- /perf:jolt -->
 
-Reading it: within ~1.2–1.6× of the JVM on in-process swaps (a counter swap 15.9 µs, 1.2×) and faster than the JVM on both
-derefs (a small deref 1.7 µs, 0.61×). `atom-$-get-map-1k` is 0.8 µs (1.3× the JVM's 0.6 µs). 64 tasks in 4.5 ms on Chez
-threads. A disk-domain swap is 139 µs, 2.2× the JVM's, with the journal engaged.
+Reading it: within ~1.2–1.7× of the JVM on in-process swaps (a counter swap 13.8 µs, 1.2×) and faster than the JVM on both
+derefs (a small deref 1.5 µs, 0.53×). `atom-$-get-map-1k` is 0.6 µs (1.0× the JVM's 0.6 µs). 64 tasks in 5.5 ms on Chez
+threads. A disk-domain swap is 153.1 µs, 2.3× the JVM's, with the journal engaged.
 
 What sets jolt's numbers:
 

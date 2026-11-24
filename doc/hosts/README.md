@@ -50,16 +50,16 @@ PersistentIntMap was removed; those cells are not carried forward.
 <!-- perf:all (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | per operation | JVM | CLJS (Node) | browser | babashka | bb-minimal | nbb | ClojureCLR | basilisp | jolt | clojerl | glojure |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `atom-swap-counter` | 12.8 µs | 41.6 µs | 17.9 µs | 1.4 ms | 1.4 ms | 535.6 µs | — | 12.2 ms | 15.9 µs | — | 5.3 ms |
-| `atom-deref-small` | 2.7 µs | 4.2 µs | 2.8 µs | 97.2 µs | 88.7 µs | 21.4 µs | — | 10.1 ms | 1.7 µs | — | 549.8 µs |
-| `atom-swap-map-1k` | 4.2 µs | 13.9 µs | 7.0 µs | 2.8 ms | 693.8 µs | 135.4 µs | — | 3657.0 ms | 6.7 µs | — | 12.3 ms |
-| `atom-deref-map-1k` | 2.3 µs | 4.4 µs | 2.5 µs | 86.5 µs | 92.2 µs | 24.6 µs | — | 1872.0 ms | 1.6 µs | — | 544.9 µs |
-| `atom-$-get-map-1k` | 0.6 µs | 6.3 µs | 2.9 µs | 109.4 µs | 112.7 µs | 55.2 µs | — | 619.6 µs | 0.8 µs | — | 700.7 µs |
-| `atom-reset-vec-1k` | 1.2 ms | 12.2 ms | 6.6 ms | 81.9 ms | 80.6 ms | 85.4 ms | — | 3845.0 ms | 3.7 ms | — | 504.5 ms |
-| `sorted-set-build-200` | 5.0 ms | 29.2 ms | 14.6 ms | 1048.0 ms | 1034.0 ms | 193.5 ms | — | 10934.0 ms | 10.4 ms | — | 5857.0 ms |
-| `disk-swap-counter` | 61.8 µs | 182.1 µs | n/a | 2.4 ms | 2.3 ms | 1.3 ms | — | 17.2 ms | 139.0 µs | — | 7.8 ms |
-| `thread-submit-64` | 3.1 ms | n/a | 125.9 ms | 31.3 ms | 2.5 ms | n/a | — | 125.3 ms | 4.5 ms | — | 10.6 ms |
+| `atom-swap-counter` | 11.4 µs | 41.6 µs | 17.9 µs | 1.4 ms | 1.4 ms | 535.6 µs | — | 12.2 ms | 13.8 µs | — | 5.3 ms |
+| `atom-deref-small` | 2.9 µs | 4.2 µs | 2.8 µs | 97.2 µs | 88.7 µs | 21.4 µs | — | 10.1 ms | 1.5 µs | — | 549.8 µs |
+| `atom-swap-map-1k` | 4.1 µs | 13.9 µs | 7.0 µs | 2.8 ms | 693.8 µs | 135.4 µs | — | 3657.0 ms | 6.9 µs | — | 12.3 ms |
+| `atom-deref-map-1k` | 2.7 µs | 4.4 µs | 2.5 µs | 86.5 µs | 92.2 µs | 24.6 µs | — | 1872.0 ms | 1.6 µs | — | 544.9 µs |
+| `atom-$-get-map-1k` | 0.6 µs | 6.3 µs | 2.9 µs | 109.4 µs | 112.7 µs | 55.2 µs | — | 619.6 µs | 0.6 µs | — | 700.7 µs |
+| `atom-reset-vec-1k` | 1.5 ms | 12.2 ms | 6.6 ms | 81.9 ms | 80.6 ms | 85.4 ms | — | 3845.0 ms | 3.6 ms | — | 504.5 ms |
+| `sorted-set-build-200` | 5.3 ms | 29.2 ms | 14.6 ms | 1048.0 ms | 1034.0 ms | 193.5 ms | — | 10934.0 ms | 10.7 ms | — | 5857.0 ms |
+| `disk-swap-counter` | 67.3 µs | 182.1 µs | n/a | 2.4 ms | 2.3 ms | 1.3 ms | — | 17.2 ms | 153.1 µs | — | 7.8 ms |
+| `thread-submit-64` | 2.5 ms | n/a | 125.9 ms | 31.3 ms | 2.5 ms | n/a | — | 125.3 ms | 5.5 ms | — | 10.6 ms |
 <!-- /perf:all -->
 
-Lower is faster. Every host that could run was measured on this box (J, Linux x86_64, Temurin 21.0.13, jolt v0.8.28, bb 1.13.226, Node 24.22.1, Basilisp 0.5.1), one at a time, 2026-11-23 8:53–9:08 PM ET, Eve `507235b`. ClojureCLR has no .NET/`cljr` on this box. clojerl dies at compile (`eve/flat_io.cljc:304` cannot resolve `long`). cljs and nbb's `thread-submit-64` fail with `The "port" argument must be a MessagePort instance` (n/a). The browser's `disk-swap-counter` is n/a (no disk domains in a page). **The box varies**: read a difference under ~1.5× between two hosts as possible noise; the orders of magnitude between groups of hosts are what this table measures. Older tables, including the 2026-10-21 release-box run, remain in git history.
+Lower is faster. Measured on this box (J, Linux x86_64, Temurin 21.0.13, jolt v0.8.28, bb 1.13.226, Node 24.22.1, Basilisp 0.5.1), one host at a time. The JVM and jolt columns were re-run 2026-11-23 10:42–10:43 PM ET at Eve `f329fc4` (load1 2.63→2.40). The other columns remain the 2026-11-23 8:53–9:08 PM ET run at Eve `507235b`. ClojureCLR has no .NET/`cljr` on this box. clojerl dies at compile (`eve/flat_io.cljc:304` cannot resolve `long`). cljs and nbb's `thread-submit-64` fail with `The "port" argument must be a MessagePort instance` (n/a). The browser's `disk-swap-counter` is n/a (no disk domains in a page). **The box varies**: read a difference under ~1.5× between two hosts as possible noise; the orders of magnitude between groups of hosts are what this table measures. Older tables, including the 2026-10-21 release-box run, remain in git history.
 
