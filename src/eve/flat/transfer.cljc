@@ -544,6 +544,9 @@
 ;; transfer
 ;; ---------------------------------------------------------------------------
 
+;; clojerl: no requiring-resolve, and a def's value compiles in as a literal
+;; (a delay is not one); transfer! takes its fallback path there
+#?(:clje (def ^:private stream-transfer* (atom nil)) :default
 (def ^:private stream-transfer*
   "STREAM-PLAN S3: the stream pipe is the transfer engine behind
    this verb. Resolved dynamically, once, because eve.flat.stream
@@ -552,7 +555,7 @@
    be resolved (it always can in this tree), transfer! falls back to
    the detach+zip path below."
   (delay (try (requiring-resolve 'eve.flat.stream/stream-transfer!)
-              (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil))))
+              (catch #?(:cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil)))))
 
 (defn transfer!
   "T1's verb (eve.flat/transfer! delegates here; the signature is W0's):

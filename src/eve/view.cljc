@@ -18,7 +18,9 @@
    An eve-deftype's view is its generated flat sister over a field source
    that reads the pinned block: it answers the type's protocols, and the
    fields its methods read come back as views of the same read."
-  (:require [eve.deftype-proto.data :as d]
+  (:require #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
+            #?(:clje [eve.host :refer [volatile!]])
+            [eve.deftype-proto.data :as d]
             [eve.atom :as ea]
             [eve.flat.chunk :as chunk]
             [eve.fast-proto :as fp]

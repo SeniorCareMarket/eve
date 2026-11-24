@@ -14,7 +14,7 @@
    host-independent contract of FORMAT-V1 §2–5 — one value packs to the
    same bytes on the JVM and on Node (X1.2)."
   (:refer-clojure :exclude [bytes])
-  (:require #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
+  (:require #?(:clje [eve.host :refer [long double shorts ints longs floats doubles objects booleans]])
             [eve.codec :as codec]
             [eve.encoding :as enc]
             #?(:clj [eve.crypto :as crypto]
@@ -25,6 +25,8 @@
                :clje [eve.crypto :as crypto])
             #?(:clje [eve.host :refer [long alength]])
             [eve.deftype-proto.data :as d]
+            #?@(:clje [[eve.types :as etypes]
+                       [eve.deftype-proto.vocab :as dtv]])
             #?@(:cljr [[eve.types :as etypes]
                        [eve.deftype-proto.vocab :as dtv]])
             [eve.flat.source :as source]
@@ -74,6 +76,11 @@
    :clj (def ^:private byte-array-class
           ;; the JVM's [B, looked up once (Class/forName per call was a name lookup per value written or read)
           (Class/forName "[B")))
+
+;; clojerl resolves a ^bytes tag as a form in this namespace, and this
+;; namespace defines its own bytes (the eve.flat API's, below), so on clje
+;; the tag names that var rather than eve.host's.
+#?(:clje (declare bytes))
 
 (defn- host-bytes?
   "x is a host byte array (the JVM's [B): the test the flat writer and
@@ -2598,10 +2605,12 @@
   [tkey fp]
   (contains? @type-registry [tkey (fp-key fp)]))
 
+;; clojerl: a declare of a var already defined rebinds it to :__unbound__
+;; (measured), so on clje it is left out where the definition came first
 (declare ->FlatVec ->FlatColVec ->FlatList ->FlatSet ->FlatMap
          ->FlatBatch ->FlatRow ->FlatRecord ->FlatTagged
          handle-ctx handle-off
-         lookup-node entries-of-node row-lookup row-entries)
+         #?@(:clje [] :default [lookup-node entries-of-node]) row-lookup row-entries)
 
 ;; --- the field sources a generated sister reads through (lane H5) ----
 ;; On every host that realizes a sister (the JVM, babashka, ClojureScript;
@@ -2859,7 +2868,9 @@
 ;; name through entries-of-node, and these shared helpers are the JVM
 ;; protocol's callers). Declared here so the helpers below name it
 ;; before either host's definition point.
-(declare -entries)
+;; clojerl: a declare of a var already defined rebinds it to :__unbound__
+;; (measured), so on clje it is left out where the definition came first
+#?(:clje nil :default (declare -entries))
 
 (defn- record-entries-rep
   "The rep of a typed value: a TypedVal over its entries' reps."
@@ -2956,6 +2967,18 @@
 #?(:cljr
    (defmacro ^:private deftype-cljr [tname fields & body]
      `(deftype ~tname ~fields ~@(cljr-deftype-forms body))))
+
+;; clojerl: the handles are written in the JVM's names (the :clj macros' surface, less
+;; java.util.* and Object) and realized onto clojerl's protocols by eve.types, as every
+;; other eve type is there (eve.types/plain-type). A syntax-quoted method name comes
+;; back namespace-qualified; the parse wants it bare. clojerl's fields are immutable,
+;; so there are no hash/digest caches (each is computed on call, as the bb and let-go
+;; sections do).
+#?(:clje
+   (defmacro deftype-clje
+     [tname fields & body]
+     (let [bare (fn [x] (if (and (seq? x) (symbol? (first x))) (cons (symbol (name (first x))) (rest x)) x))]
+       (etypes/plain-type nil tname fields (dtv/parse-protocol-impls (map bare body))))))
 
 #?@(:bb [(defmacro defseqhandle [tname & _]
            `(defn ~(symbol (str "->" tname)) [& ~'args]
@@ -3088,6 +3111,69 @@
        ~@(when list?
            '[clojure.lang.IPersistentList
              (peek [this] (when (pos? (.count this)) (nth this 0)))
+             (pop [this] (pop-flat this))
+             clojure.lang.IPersistentCollection
+             (cons [this v] (cons-flat this v))
+             (empty [_] ())
+             (equiv [this other] (node-equiv ctx off other))]))))]
+    :clje [(defmacro defseqhandle
+  "A sequential handle over the node at off (clojerl; see deftype-clje)."
+  [tname fields nthf countf seqf repf & {:keys [vector? list?]}]
+  (let [remake (map (fn [f] (if (= f 'mm) 'm f)) fields)]
+    `(deftype-clje ~tname ~fields
+       ;; sequential? is what clojerl's vector and list = ask of the other side
+       clojure.lang.Sequential
+       clojure.lang.IHashEq
+       (hasheq [this#] (node-hasheq ~'ctx ~'off))
+       clojure.lang.IObj
+       (meta [_#] ~'mm)
+       (withMeta [_# ~'m] (new ~tname ~@remake))
+       IAttachMeta
+       (-attach-meta [_# ~'m] (new ~tname ~@remake))
+       (-hmeta [_#] ~'mm)
+       IFlatHandle
+       (-rep [this#] (let [r# (~repf ~'ctx ~'off)]
+                       (if (some? ~'mm) (MetaVal. r# (to-rep ~'mm)) r#)))
+       (-chunk-bytes [_#] (.-bs ~'ctx))
+       IHandlePos
+       (-hctx [_#] ~'ctx)
+       (-hoff [_#] ~'off)
+       IFlatDigest
+       (-digest [this#] (handle-digest ~'ctx ~'off))
+       clojure.lang.Counted
+       (count [_#] (~countf ~'ctx ~'off))
+       clojure.lang.Seqable
+       (seq [this#] (when (pos? (~countf ~'ctx ~'off)) (~seqf ~'ctx ~'off)))
+       clojure.lang.Indexed
+       (nth [this# i#] (let [n# (~countf ~'ctx ~'off)]
+                         (if (and (<= 0 i#) (< i# n#)) (~nthf ~'ctx ~'off i#)
+                             (throw (ex-info (str "Index out of bounds: " i#) {:index i#})))))
+       (nth [this# i# nf#] (let [n# (~countf ~'ctx ~'off)]
+                             (if (and (<= 0 i#) (< i# n#)) (~nthf ~'ctx ~'off i#) nf#)))
+       clojure.lang.IReduce
+       (reduce [this# f#] (reduce f# (seq this#)))
+       clojure.lang.IReduceInit
+       (reduce [this# f# init#] (reduce f# init# (seq this#)))
+       ~@(when vector?
+           '[clojure.lang.IPersistentVector
+             (assocN [this i v] (assocN-flat this i v))
+             (cons [this v] (cons-flat this v))
+             (pop [this] (pop-flat this))
+             (peek [this] (when (pos? (count this)) (nth this (dec (count this)))))
+             clojure.lang.Associative
+             (assoc [this k v] (assocN-flat this (long k) v))
+             (containsKey [this k] (and (integer? k) (<= 0 k) (< k (count this))))
+             (entryAt [this k] (when (and (integer? k) (<= 0 k) (< k (count this)))
+                                 (first (seq (array-map k (nth this k))))))
+             clojure.lang.ILookup
+             (valAt [this k] (if (and (integer? k) (<= 0 k) (< k (count this))) (nth this k) nil))
+             (valAt [this k nf] (if (and (integer? k) (<= 0 k) (< k (count this))) (nth this k) nf))
+             clojure.lang.IPersistentCollection
+             (empty [_] [])
+             (equiv [this other] (node-equiv ctx off other))])
+       ~@(when list?
+           '[clojure.lang.IPersistentList
+             (peek [this] (when (pos? (count this)) (nth this 0)))
              (pop [this] (pop-flat this))
              clojure.lang.IPersistentCollection
              (cons [this v] (cons-flat this v))
@@ -3363,6 +3449,72 @@
        (keySet [this#] (into #{} (map (fn [e#] (nth e# 0))) (-entries this#)))
        (values [this#] (into [] (map (fn [e#] (nth e# 1))) (-entries this#)))
        (entrySet [this#] (into #{} (map (fn [e#] (clojure.lang.MapEntry. (nth e# 0) (nth e# 1))) (-entries this#)))))))]
+    :clje [(defmacro defmaphandle
+  "A map handle over the node (clojerl; see deftype-clje and the :clj macro's doc)."
+  [tname fields entries lookup countf repf digestf assocf dissocf & {:keys [record? row? generic?]}]
+  (let [factory (symbol (str "->" tname))
+        wm-args (map (fn [f] (case f mm 'm f)) fields)]
+    `(deftype-clje ~tname ~fields
+       clojure.lang.IHashEq
+       (hasheq [this#] (entries-hasheq this#))
+       clojure.lang.IObj
+       (meta [_#] ~'mm)
+       (withMeta [_# ~'m] (~factory ~@wm-args))
+       IAttachMeta
+       (-attach-meta [_# ~'m] (~factory ~@wm-args))
+       (-hmeta [_#] ~'mm)
+       IFlatHandle
+       (-rep [this#] (let [r# (~repf this#)]
+                       (if (some? ~'mm) (MetaVal. r# (to-rep ~'mm)) r#)))
+       (-chunk-bytes [_#] (.-bs ~'ctx))
+       IHandlePos
+       (-hctx [_#] ~'ctx)
+       (-hoff [_#] ~'off)
+       IFlatDigest
+       (-digest [this#] (~digestf this#))
+       IMapSource
+       (-entries [_#] ~entries)
+       (-lookup [_# ~'k ~'nf] ~lookup)
+       (-mcount [_#] ~countf)
+       (-assoc-entry [this# k# v#] (~assocf this# k# v#))
+       (-dissoc-entry [this# k#] (~dissocf this# k#))
+       ~@(when record?
+           '[IRecordInfo
+             (-tkey [_] tkey)
+             (-fp [_] fp)])
+       ~@(when row?
+           '[IRowHandle
+             (-row-index [_] row)])
+       ~@(when generic? '[IGenericRecord])
+       clojure.lang.IPersistentMap
+       (assoc [this# k# v#] (-assoc-entry this# k# v#))
+       (without [this# k#] (-dissoc-entry this# k#))
+       clojure.lang.Associative
+       (containsKey [this# k#] (not (identical? ::absent (-lookup this# k# ::absent))))
+       (entryAt [this# k#] (let [v# (-lookup this# k# ::absent)]
+                             (when-not (identical? ::absent v#) (first (seq (array-map k# v#))))))
+       clojure.lang.IPersistentCollection
+       (count [this#] (-mcount this#))
+       (cons [this# o#] (cond (vector? o#)
+                              (if (== 2 (count o#)) (-assoc-entry this# (nth o# 0) (nth o# 1))
+                                  (throw (ex-info "Vector arg to map conj must be a pair" {})))
+                              (map? o#) (reduce (fn [m# e#] (-assoc-entry m# (key e#) (val e#))) this# o#)
+                              :else (reduce (fn [m# e#] (-assoc-entry m# (nth e# 0) (nth e# 1))) this# o#)))
+       (empty [_#] {})
+       (equiv [this# other#] (map-equiv-of this# other#))
+       clojure.lang.ILookup
+       (valAt [this# k#] (-lookup this# k# nil))
+       (valAt [this# k# nf#] (-lookup this# k# nf#))
+       clojure.lang.Seqable
+       (seq [this#] (when (pos? (-mcount this#))
+                      (seq (map (fn [e#] (first (seq (array-map (nth e# 0) (nth e# 1))))) (-entries this#)))))
+       clojure.lang.IFn
+       (invoke [this# k#] (-lookup this# k# nil))
+       (invoke [this# k# nf#] (-lookup this# k# nf#))
+       clojure.lang.IReduce
+       (reduce [this# f#] (reduce f# (seq this#)))
+       clojure.lang.IReduceInit
+       (reduce [this# f# init#] (reduce f# init# (seq this#))))))]
     :cljr [(defmacro defmaphandle
   "A map handle as a deftype over the node — one construction for
    every host of this family, replacing the proxy over
@@ -3654,6 +3806,44 @@
   (removeAll [_ _c] (throw (UnsupportedOperationException.)))
   (retainAll [_ _c] (throw (UnsupportedOperationException.)))
   (clear [_] (throw (UnsupportedOperationException.))))]
+    :clje [(deftype-clje FlatSet [ctx off mm _h _d]
+  ;; clojerl: the :clj FlatSet's surface (see deftype-clje)
+  IFlatHandle
+  (-rep [_] (let [r (into #{} (map rep-of) (set-elements ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  IFlatDigest
+  (-digest [_] (handle-digest ctx off))
+  IAttachMeta
+  (-attach-meta [_ m] (->FlatSet ctx off m _h _d))
+  (-hmeta [_] mm)
+  clojure.lang.IHashEq
+  (hasheq [_] (node-hasheq ctx off))
+  clojure.lang.IObj
+  (meta [_] mm)
+  (withMeta [_ m] (->FlatSet ctx off m _h _d))
+  clojure.lang.IPersistentSet
+  (disjoin [this v] (disjoin-flat this v))
+  (contains [_ v] (boolean (some (fn [e] (= e v)) (set-elements ctx off))))
+  clojure.lang.ILookup
+  (valAt [_ v] (some (fn [e] (when (= e v) e)) (set-elements ctx off)))
+  (valAt [_ v nf] (if (some (fn [e] (= e v)) (set-elements ctx off)) v nf))
+  clojure.lang.IPersistentCollection
+  (count [_] (first (set-parts ctx off)))
+  (cons [this v] (cons-flat this v))
+  (empty [_] #{})
+  (equiv [_ other] (node-equiv ctx off other))
+  clojure.lang.Seqable
+  (seq [_] (when (pos? (first (set-parts ctx off))) (seq (set-elements ctx off))))
+  clojure.lang.IFn
+  (invoke [_ v] (some (fn [e] (when (= e v) e)) (set-elements ctx off)))
+  clojure.lang.IReduce
+  (reduce [this f] (reduce f (seq this)))
+  clojure.lang.IReduceInit
+  (reduce [this f init] (reduce f init (seq this))))]
     :cljr [(deftype-cljr FlatSet [^Ctx ctx off mm ^:unsynchronized-mutable _h ^:unsynchronized-mutable _d]
   ;; a deftype, not a proxy over APersistentSet, for the same
   ;; reason as the map handles (defmaphandle): the interfaces

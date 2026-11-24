@@ -213,7 +213,8 @@
 
 ;; defined with the converter at the foot of this namespace; registering
 ;; a descriptor is what first forces it
-(declare converter-registered)
+#?(:clje (declare register-converter!)
+   :default (declare converter-registered))
 
 (defn register-descriptor!
   "Register a sister descriptor: held here, and — on a host with the
@@ -226,7 +227,7 @@
   (let [ks (into #{} (map :keyword) (:fields desc))
         desc (assoc desc :record? (and (contains? ks :record-extmap__) (contains? ks :record-meta__)))]
   (swap! descriptors assoc (:type-key desc) desc)
-  @converter-registered
+  #?(:clje (register-converter!) :default @converter-registered)
   (when-let [factory (:factory desc)]
     (when-let [register! (chunk-var 'register-type!)]
       (register! (:type-key desc) (:fingerprint desc) factory)))
@@ -570,13 +571,26 @@
              desc (descriptor tkey)]
          (typed-rep-of tkey (:fingerprint desc) (field-values desc v)))))
 
+#?(:clje nil :default
 (defonce ^:private converter-registered
      (delay (when-let [register! (chunk-var 'register-rep-converter!)]
               (register! instance->typed-rep)
               (when-let [register-nominal! (chunk-var 'register-nominal-rep-converter!)]
                 (register-nominal! record->typed-rep)
                 (register-nominal! own-type->typed-rep))
-              true)))
+              true))))
+;; clojerl: a top-level def's value compiles in as a literal, so there is no
+;; delay to hold; the same registration runs once behind a flag instead
+;; (and a declare there binds the var, so a defonce after one never ran)
+#?(:clje (defonce ^:private converter-done (atom false)))
+#?(:clje (defn- register-converter! []
+           (when (compare-and-set! converter-done false true)
+             (when-let [register! (chunk-var 'register-rep-converter!)]
+               (register! instance->typed-rep)
+               (when-let [register-nominal! (chunk-var 'register-nominal-rep-converter!)]
+                 (register-nominal! record->typed-rep)
+                 (register-nominal! own-type->typed-rep))))
+           true))
 
 (defn construct-flat
      "Build type-key's flat sister from its slab-field values, in

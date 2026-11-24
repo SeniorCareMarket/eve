@@ -75,6 +75,7 @@
         (cond
           (= f 'clojure.lang.Cons.) (list* 'clojure.core/cons args)
           (= f 'clojure.lang.MapEntry/create) (vec args)
+          (= f 'clojure.lang.MapEntry.) (vec args)
           (= f 'clojure.lang.AFn/applyToHelper) (list 'clojure.core/apply (first args) (second args))
           (= f 'System/identityHashCode) (list 'erlang/phash2 (first args))
           (clje-exception? f) (list 'clojure.core/ex-info

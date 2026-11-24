@@ -24,7 +24,9 @@
    (block-scan in eve.flat.transfer carries the matching cases).
    Reads walk the links once, linearly, gather the stream and
    open it; the gathered handle is cached on the value."
-  (:require [eve.deftype-proto.alloc :as alloc]
+  (:require #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
+            #?(:clje [eve.host :refer [unsigned-bit-shift-right alength aget aset object-array unchecked-byte]])
+            [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
             [eve.deftype-proto.serialize :as ser]
             [eve.slab-io :as slab]
@@ -259,6 +261,7 @@
 (declare -handle frozen-value?)
 #?(:clj (declare based-of based-assoc based-pop)
    :cljr (declare based-of based-assoc based-pop)
+   :clje (declare based-of based-assoc based-pop)
    :lpy (declare based-of based-assoc based-pop))
 ;; The protocol hosts' spellings of the based/concat helpers
 ;; (eve.core calls instead of host collection calls), defined
@@ -496,6 +499,52 @@
      (hashCode [this] (hash (-handle this sio hdr)))
      (toString [_] (str "#eve/frozen " hdr)))
     :cljr (deftype-cljr FrozenValue [sio ^long hdr cells]
+     d/IEveRoot
+     (-root-header-off [_] hdr)
+     d/IEveSio
+     (-eve-sio [_] sio)
+     clojure.lang.ILookup
+     (valAt [this k] (get (-handle this sio hdr) k))
+     (valAt [this k nf] (get (-handle this sio hdr) k nf))
+     clojure.lang.IPersistentCollection
+     (count [this] (count (-handle this sio hdr)))
+     ;; writes follow the upgrade law (UPGRADE-PLAN R2/R4):
+     ;; an edit the chunk form expresses stays flat — the
+     ;; handle's own path-copy answers. Only an edit the
+     ;; handle refuses upgrades, and it upgrades to a
+     ;; BasedValue EMBEDDING this frozen value by reference —
+     ;; never to a materialization. plain-of stays available
+     ;; as the explicit escape hatch.
+     (cons [this x] (try (conj (-handle this sio hdr) x)
+                         (catch #?(:jank jank.runtime.object_ref :clj UnsupportedOperationException :cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :default Throwable) _
+                           (conj (based-of this) x))))
+     (empty [_] (throw (UnsupportedOperationException. "empty on a frozen value")))
+     (equiv [this other] (= (-handle this sio hdr) other))
+     clojure.lang.Indexed
+     (nth [this i] (nth (-handle this sio hdr) i))
+     (nth [this i nf] (nth (-handle this sio hdr) i nf))
+     clojure.lang.Associative
+     (containsKey [this k] (contains? (-handle this sio hdr) k))
+     (entryAt [this k] (find (-handle this sio hdr) k))
+     (assoc [this k v] (try (assoc (-handle this sio hdr) k v)
+                            (catch #?(:jank jank.runtime.object_ref :clj UnsupportedOperationException :cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :default Throwable) _
+                              (based-assoc this k v))))
+     clojure.lang.IPersistentStack
+     (peek [this] (peek (-handle this sio hdr)))
+     (pop [this] (try (pop (-handle this sio hdr))
+                       (catch #?(:jank jank.runtime.object_ref :clj UnsupportedOperationException :cljs :default :cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :default Throwable) _
+                         (based-pop this))))
+     clojure.lang.Seqable
+     (seq [this] (seq (-handle this sio hdr)))
+     clojure.lang.IHashEq
+     (hasheq [this] (hash (-handle this sio hdr)))
+     Object
+     (equals [this other] (or (identical? this other) (= (-handle this sio hdr) other)))
+     (hashCode [this] (hash (-handle this sio hdr)))
+     (toString [_] (str "#eve/frozen " hdr)))
+    ;; clojerl: the :cljr arm's JVM-named surface, realized by eve.types
+    ;; (eve.flat.chunk/deftype-clje)
+    :clje (chunk/deftype-clje FrozenValue [sio ^long hdr cells]
      d/IEveRoot
      (-root-header-off [_] hdr)
      d/IEveSio
@@ -925,6 +974,72 @@
                                (== total (count other))
                                (= (seq this) (seq other))))
      (hashCode [this] (hash (vec (seq this))))
+     (toString [this] (pr-str (seq this))))
+    ;; clojerl: the :cljr arm's JVM-named surface, realized by eve.types
+    ;; (eve.flat.chunk/deftype-clje)
+    :clje (chunk/deftype-clje ConcatBatch [handles cums ^long total mm]
+     clojure.lang.Counted
+     (count [_] total)
+     clojure.lang.Indexed
+     (nth [this i] (if (and (<= 0 i) (< i total))
+                     (let [j (cb-locate cums i)]
+                       (nth (nth handles j) (- i (nth cums j))))
+                     (throw (IndexOutOfBoundsException. (str i)))))
+     (nth [this i nf] (if (and (<= 0 i) (< i total))
+                        (nth this i) nf))
+     clojure.lang.ILookup
+     (valAt [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) total))
+                       (nth this (long k)) nil))
+     (valAt [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) total))
+                          (nth this (long k)) nf))
+     clojure.lang.Associative
+     (containsKey [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) total)))
+     (entryAt [this k] (when (.containsKey this k)
+                         (clojure.lang.MapEntry. k (nth this (long k)))))
+     (assoc [this k v] (cond
+                         (not (integer? k)) (throw (IllegalArgumentException.
+                                                    "Key must be integer"))
+                         (== (long k) total) (conj this v)
+                         :else (concat-assoc-n handles cums total mm (long k) v)))
+     clojure.lang.IPersistentVector
+     (length [_] total)
+     (assocN [this i v] (concat-assoc-n handles cums total mm i v))
+     (cons [this v] (let [h' (chunk/open (first (chunk/pack-all [v])))]
+                      (ConcatBatch. (conj handles h') (conj cums total)
+                                    (inc total) mm)))
+     (peek [this] (when (pos? total) (nth this (dec total))))
+     (pop [this] (if (zero? total)
+                   (throw #?(:jank (ex-info "Can't pop empty vector" {}) :default (IllegalStateException. "Can't pop empty vector")))
+                   (let [hl (peek handles)]
+                     (if (== 1 (count hl))
+                       (ConcatBatch. (pop handles) (pop cums) (dec total) mm)
+                       (ConcatBatch. (assoc handles (dec (count handles)) (pop hl))
+                                     cums (dec total) mm)))))
+     clojure.lang.IPersistentCollection
+     (empty [_] [])
+     (equiv [this other] (.equals this other))
+     clojure.lang.Seqable
+     (seq [_] (apply concat (map seq handles)))
+     clojure.lang.IMeta
+     (meta [_] mm)
+     clojure.lang.IObj
+     (withMeta [_ m] (ConcatBatch. handles cums total m))
+     clojure.lang.IHashEq
+     (hasheq [this] (hash (vec (seq this))))
+     ;; a delivered multi-chunk batch IS a flat handle: its rep
+     ;; is its rows' reps (the same shape a single chunk's batch
+     ;; rep has), and its chunk bytes are the framed stream —
+     ;; the byte form embed writes and open-stream reads. Without
+     ;; this, -handle of a framed FrozenValue (a ConcatBatch) had
+     ;; no -rep and packing a value holding one threw.
+     chunk/IFlatHandle
+     (-rep [this] (mapv chunk/rep-of this))
+     (-chunk-bytes [_] (frame-stream (mapv chunk/bytes-of handles)))
+     Object
+     (equals [this other] (and (sequential? other)
+                               (== total (count other))
+                               (= (seq this) (seq other))))
+     (hashCode [this] (hash (vec (seq this))))
      (toString [this] (pr-str (seq this)))))
 
 ;; ---------------------------------------------------------------------------
@@ -1251,6 +1366,59 @@
                                (== n (count other))
                                (= (seq this) (seq other))))
      (hashCode [this] (hash (vec (seq this))))
+     (toString [this] (pr-str (seq this))))
+    ;; clojerl: the :cljr arm's JVM-named surface, realized by eve.types
+    ;; (eve.flat.chunk/deftype-clje)
+    :clje (chunk/deftype-clje BasedValue [base edits tail ^long n ^long bc mm]
+     clojure.lang.Counted
+     (count [_] n)
+     clojure.lang.Indexed
+     (nth [this i] (if (and (<= 0 i) (< i n))
+                     (if (< i bc)
+                       (if (contains? edits i) (get edits i) (nth base i))
+                       (nth tail (- i bc)))
+                     (throw (IndexOutOfBoundsException. (str i)))))
+     (nth [this i nf] (if (and (<= 0 i) (< i n)) (nth this i) nf))
+     clojure.lang.ILookup
+     (valAt [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
+                       (nth this (long k)) nil))
+     (valAt [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) n))
+                          (nth this (long k)) nf))
+     clojure.lang.Associative
+     (containsKey [_ k] (and (integer? k) (<= 0 (long k)) (< (long k) n)))
+     (entryAt [this k] (when (.containsKey this k)
+                         (clojure.lang.MapEntry. k (nth this (long k)))))
+     (assoc [this k v] (if (integer? k)
+                         (based-assoc-n base edits tail n bc mm (long k) v)
+                         (throw (IllegalArgumentException.
+                                 "Key must be integer"))))
+     clojure.lang.IPersistentVector
+     (length [_] n)
+     (assocN [this i v] (based-assoc-n base edits tail n bc mm i v))
+     (cons [this v] (based-assoc-n base edits tail n bc mm n v))
+     (peek [this] (when (pos? n) (nth this (dec n))))
+     (pop [this] (if (zero? n)
+                   (throw #?(:jank (ex-info "Can't pop empty vector" {}) :default (IllegalStateException. "Can't pop empty vector")))
+                   (let [i (dec n)]
+                     (if (< i bc)
+                       (BasedValue. base (dissoc edits i) tail i bc mm)
+                       (BasedValue. base edits (pop tail) i bc mm)))))
+     clojure.lang.IPersistentCollection
+     (empty [_] [])
+     (equiv [this other] (.equals this other))
+     clojure.lang.Seqable
+     (seq [this] (when (pos? n) (map (fn [i] (nth this i)) (range n))))
+     clojure.lang.IMeta
+     (meta [_] mm)
+     clojure.lang.IObj
+     (withMeta [_ m] (BasedValue. base edits tail n bc m))
+     clojure.lang.IHashEq
+     (hasheq [this] (hash (vec (seq this))))
+     Object
+     (equals [this other] (and (sequential? other)
+                               (== n (count other))
+                               (= (seq this) (seq other))))
+     (hashCode [this] (hash (vec (seq this))))
      (toString [this] (pr-str (seq this)))))
 
 #?(:lpy (do
@@ -1474,12 +1642,20 @@
       empty overlay: the upgrade answer's starting point. The
       base object is held as-is — embedding is by reference."
      [base]
+     (BasedValue. base {} [] (count base) (count base) nil))
+   :clje (defn based-of
+     "Wrap a flat base (a chunk handle or a FrozenValue) in an
+      empty overlay: the upgrade answer's starting point. The
+      base object is held as-is — embedding is by reference."
+     [base]
      (BasedValue. base {} [] (count base) (count base) nil)))
 
 #?(:clj (defn based-assoc [base k v] (assoc (based-of base) k v))
-   :cljr (defn based-assoc [base k v] (assoc (based-of base) k v)))
+   :cljr (defn based-assoc [base k v] (assoc (based-of base) k v))
+   :clje (defn based-assoc [base k v] (assoc (based-of base) k v)))
 #?(:clj (defn based-pop [base] (pop (based-of base)))
-   :cljr (defn based-pop [base] (pop (based-of base))))
+   :cljr (defn based-pop [base] (pop (based-of base)))
+   :clje (defn based-pop [base] (pop (based-of base))))
 
 #?(:lpy (do (defn based-of [base] (BasedValue. base {} [] (count base) (count base) nil))
             (defn based-assoc [base k v] (assoc (based-of base) k v))
@@ -1536,6 +1712,10 @@
                    counts (mapv count handles)
                    cums (vec (reductions + 0 (butlast counts)))]
                (ConcatBatch. handles cums (long (reduce + counts)) nil))
+       :clje (let [handles (mapv chunk/open chunks)
+                   counts (mapv count handles)
+                   cums (vec (reductions + 0 (butlast counts)))]
+               (ConcatBatch. handles cums (long (reduce + counts)) nil))
        ;; let-go: the :clj body is host-neutral (chunk/open, count,
        ;; reductions) and is spelled for it directly
        :lg (let [handles (mapv chunk/open chunks)
@@ -1564,6 +1744,15 @@
              h))))
    :cljr
    (defn -handle [^FrozenValue fv sio ^long hdr]
+     (let [cells (.-cells fv)]
+       (or (aget cells 0)
+           (let [mode (aget cells 1)
+                 h (case mode
+                     :framed (open-stream (unframe-stream (read-chain-bytes sio hdr)))
+                     (chunk/open (read-chain-bytes sio hdr)))]
+             (aset cells 0 h)
+             h))))
+   :clje (defn -handle [^FrozenValue fv sio ^long hdr]
      (let [cells (.-cells fv)]
        (or (aget cells 0)
            (let [mode (aget cells 1)
@@ -1615,6 +1804,13 @@
                     (aset cells 1 :framed))
                   (->FrozenValue sio (long header-off) cells))))
      :cljr (let [cells (object-array 2)
+                 flags (slab/read-i32 sio header-off 44)]
+             (if (== (bit-and flags 4) 4)
+               (chunk/open (read-chain-bytes sio header-off))
+               (do (when (== (bit-and flags 2) 2)
+                     (aset cells 1 :framed))
+                   (->FrozenValue sio (long header-off) cells))))
+     :clje (let [cells (object-array 2)
                  flags (slab/read-i32 sio header-off 44)]
              (if (== (bit-and flags 4) 4)
                (chunk/open (read-chain-bytes sio header-off))
@@ -1707,9 +1903,11 @@
     ;; already flat: a frozen subtree delivers as its opened
     ;; handle (whose bytes were copied out of the slab — the
     ;; handle owns them); a heap flat handle delivers as itself.
-    #?(:clj (instance? FrozenValue v) :cljs false :lg (instance? FrozenValue v) :lpy (instance? FrozenValue v) :cljr (instance? FrozenValue v))
+    #?(:clj (instance? FrozenValue v) :cljs false :lg (instance? FrozenValue v) :lpy (instance? FrozenValue v) :cljr (instance? FrozenValue v)
+                                                                                                               :clje (instance? FrozenValue v))
     (-handle v (.-sio ^FrozenValue v) (.-hdr ^FrozenValue v))
-    #?(:clj (instance? ConcatBatch v) :cljs false :lg (instance? ConcatBatch v) :lpy (instance? ConcatBatch v) :cljr (instance? ConcatBatch v)) v
+    #?(:clj (instance? ConcatBatch v) :cljs false :lg (instance? ConcatBatch v) :lpy (instance? ConcatBatch v) :cljr (instance? ConcatBatch v)
+                                                                                                               :clje (instance? ConcatBatch v)) v
     (chunk/flat-handle? v) v
     (sequential? v) (open-stream (chunk/pack-all v))
     (coll? v) (chunk/pack v)

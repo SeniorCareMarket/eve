@@ -98,7 +98,9 @@
 ; cannot resolve [Ljava.lang.Object; (bb test:cljr, 2026-11-23).
 (def ^:private #?(:clj ^{:tag "[Ljava.lang.Object;"} int-key-memo
                   :default int-key-memo)
-  (object-array INT-KEY-MEMO-N))
+  ;; clojerl: a def's value compiles into the module as a literal, which a
+  ;; writable host array is not; clje keeps no int memo (each miss computes)
+  #?(:clje nil :default (object-array INT-KEY-MEMO-N)))
 
 #?(:jolt
    (do
@@ -123,7 +125,7 @@
                 pair [kb (portable-hash-bytes kb)]]
             (enc/cache-put! key-memo k pair KEY-MEMO-MAX)
             pair))
-      (if (and (integer? k) (number? k) (not (neg? k)) (< k INT-KEY-MEMO-N))
+      (if #?(:clje false :default (and (integer? k) (number? k) (not (neg? k)) (< k INT-KEY-MEMO-N)))
         (or (aget #?(:clj ^{:tag "[Ljava.lang.Object;"} int-key-memo :default int-key-memo) (int k))
             (let [kb (serialize-key-bytes k)
                   pair [kb (portable-hash-bytes kb)]]

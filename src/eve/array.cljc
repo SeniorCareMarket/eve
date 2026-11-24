@@ -46,7 +46,9 @@
    ;; the chunk's own cone never requires this namespace, and
    ;; eve.deftype already pulls the chunk in through
    ;; eve.flat.sister on this host.
-   #?@(:cljs [[eve.flat.chunk :as flat-chunk]])))
+   #?@(:cljs [[eve.flat.chunk :as flat-chunk]]
+       ;; clojerl: no requiring-resolve; static, as on cljs
+       :clje [[eve.flat.chunk :as flat-chunk]])))
 
 ;; Forward declarations
 (declare eve-array aget aset!)
@@ -514,6 +516,7 @@
                 ;; array of that subtype (IEveArray below)
                 {:eve/array-subtype (type-kw->subtype type-kw)})
         pack #?(:cljs flat-chunk/pack
+                :clje flat-chunk/pack
                 :default (try (requiring-resolve 'eve.flat.chunk/pack)
                               (catch #?(:cljd dynamic :cljr Exception :lpy python/BaseException :clje _ :glj go/any :jank jank.runtime.object_ref :default Throwable) _ nil)))]
     (when-not pack

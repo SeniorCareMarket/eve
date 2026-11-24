@@ -1756,7 +1756,9 @@
     (finally
       (unpin-epoch! ds))))
 
-(declare read-root-value)
+;; clojerl: a declare of a var already defined rebinds it to :__unbound__
+;; (measured), so on clje it is left out where the definition came first
+#?(:clje nil :default (declare read-root-value))
 
 (defn- view-deref
   "deref outside `$` (and outside a swap!), where views are built: the root
