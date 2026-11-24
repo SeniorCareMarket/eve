@@ -21,14 +21,26 @@
 // 'eve:<root>'. Its workers then open the files, and a domain's root read in fresh is recovered (eve.atom), as after
 // a crash. Handles a dead owner held may outlive it a moment (exclusive mode): opens retry while the browser says
 // NoModificationAllowedError.
+//
+// Followers (W8): a follower tab's worker calls the owner (FOLLOW_CALL: request bytes in the string area, the reply
+// there after); this worker posts {eveCall} on the channel and answers when the owner's {eveReply} comes (or EveNoOwner
+// after CALL_MS: no owner served it). The owner's io worker queues the calls and hands them one at a time to its
+// tab's follower server (eve.opfs.follow, an eve thread) through the pool's svc block: S_REQ goes up with a call in
+// it, S_RESP is set to it with the reply. An owner's file write (a commit's) is announced {eveCommit}, at most once
+// a turn: a follower counts them in COMMITS, and a cached value read before the count moved is stale.
 'use strict';
 const LOCK = 0, DOORBELL = 1, DONE = 2, OP = 3, STATUS = 4, R0 = 5, R1 = 6, R2 = 7, NARGS = 8, NSTR = 9,
-      ROLE = 10, TERM = 11, SEEN_TERM = 12, ARGS = 16;
+      ROLE = 10, TERM = 11, SEEN_TERM = 12, COMMITS = 13, ARGS = 16;
+const S_REQ = 0, S_RESP = 1, S_LEN = 2, S_BYTES = 16, CALL_MS = 10000;
 const FOLLOWER = 0, OWNER = 1;
 const OPEN = 1, PERSIST = 2, EXISTS = 3, SIZE = 4, CREATE_EXCL = 5, RENAME = 6, DELETE = 7, CLOSE_ALL = 8,
-      MKDIRS = 9, PERSIST_CHANGED = 10;
+      MKDIRS = 9, PERSIST_CHANGED = 10, FOLLOW_CALL = 11;
 const PAGE = 4096, BOUNCE = 1 << 20;
-let ctl, ctlBytes, argsCap, strBase, slots, root, nextSlot = 0, handleOpts, tab, channel;
+let ctl, ctlBytes, argsCap, strBase, slots, root, nextSlot = 0, handleOpts, tab, channel, svc, svcBytes;
+let callSeq = 0, announcing = false;
+const calls = new Map();        // a follower's call id -> resolve(bytes)
+const queue = [];               // the owner's calls not yet served: {from, id, bytes}
+let serving = null;             // the owner's call in the svc block
 const freeSlots = [];           // slots CLOSE_ALL let go, reused before fresh ones
 const byPath = new Map();       // path -> {slot, handle}
 const bySlot = [];              // slot -> {path, handle, hashes: Int32Array, 2 per page}
@@ -176,6 +188,7 @@ function persist(nargs) {
     writeRun(e, src, off, len);
   }
   e.handle.flush();
+  announce();
 }
 function persistChanged() {
   const e = openSlot(ctl[ARGS]);
@@ -195,6 +208,7 @@ function persistChanged() {
   if (start >= 0) writeRun(e, u8, start, len - start);
   e.handle.flush();
   ctl[R0] = pages;
+  if (pages > 0) announce();
 }
 
 async function size(path) {
@@ -290,9 +304,64 @@ function strings() {
 
 class EveNotOwner extends Error {}
 EveNotOwner.prototype.name = 'EveNotOwner';
+class EveNoOwner extends Error {}
+EveNoOwner.prototype.name = 'EveNoOwner';
+
+function announce() {
+  Atomics.add(ctl, COMMITS, 1);
+  if (announcing) return;
+  announcing = true;
+  setTimeout(() => { announcing = false; channel.postMessage({eveCommit: tab}); }, 0);
+}
+
+// A follower's call to the owner: the string area's bytes out, the reply's back in
+async function followCall() {
+  if (Atomics.load(ctl, ROLE) === OWNER) throw new EveNotOwner('this tab owns ' + root.name + ': it calls no owner');
+  const n = ctl[NSTR];
+  const bytes = ctlBytes.slice(strBase, strBase + n);
+  const id = ++callSeq;
+  const reply = await new Promise((resolve) => {
+    calls.set(id, resolve);
+    channel.postMessage({eveCall: {from: tab, id, bytes}});
+    setTimeout(() => { if (calls.delete(id)) resolve(null); }, CALL_MS);
+  });
+  if (reply === null) throw new EveNoOwner('no owner of ' + root.name + ' answered within ' + CALL_MS + ' ms');
+  if (reply.length > ctlBytes.length - strBase) throw new Error('eve.opfs: a reply exceeds the request block');
+  ctlBytes.set(reply, strBase);
+  ctl[NSTR] = reply.length; ctl[R0] = reply.length;
+}
+
+// The owner: the next queued call into the svc block, its reply posted back when the server sets S_RESP
+function pump() {
+  if (serving || queue.length === 0 || !svc) return;
+  const c = queue.shift();
+  if (c.bytes.length > svcBytes.length - 4 * S_BYTES) { channel.postMessage({eveReply: {to: c.from, id: c.id, bytes: null}}); return pump(); }
+  serving = c;
+  svcBytes.set(c.bytes, 4 * S_BYTES);
+  Atomics.store(svc, S_LEN, c.bytes.length);
+  const req = Atomics.add(svc, S_REQ, 1) + 1;
+  Atomics.notify(svc, S_REQ);
+  awaitReply(req);
+}
+function awaitReply(req) {
+  const done = () => {
+    const n = Atomics.load(svc, S_LEN);
+    const bytes = svcBytes.slice(4 * S_BYTES, 4 * S_BYTES + n);
+    channel.postMessage({eveReply: {to: serving.from, id: serving.id, bytes}});
+    serving = null;
+    pump();
+  };
+  const cur = Atomics.load(svc, S_RESP);
+  if (cur === req) return done();
+  if (typeof Atomics.waitAsync === 'function') {
+    const r = Atomics.waitAsync(svc, S_RESP, cur);
+    if (r.async) r.value.then(() => awaitReply(req)); else awaitReply(req);
+  } else setTimeout(() => awaitReply(req), 1);
+}
 
 async function serve() {
   const op = ctl[OP], nargs = ctl[NARGS];
+  if (op === FOLLOW_CALL) return followCall();
   if (Atomics.load(ctl, ROLE) !== OWNER)
     throw new EveNotOwner('this tab follows the owner of ' + root.name + ' (term ' + Atomics.load(ctl, SEEN_TERM) + ')');
   const s = strings();
@@ -315,7 +384,7 @@ function fail(err) {
   const msg = encoder.encode(String((err && err.name ? err.name + ': ' : '') + (err && err.message || err)));
   const n = Math.min(msg.length, ctlBytes.length - strBase);
   ctlBytes.set(msg.subarray(0, n), strBase);
-  ctl[NSTR] = n; ctl[STATUS] = err instanceof EveNotOwner ? 2 : 1;
+  ctl[NSTR] = n; ctl[STATUS] = err instanceof EveNotOwner ? 2 : err instanceof EveNoOwner ? 3 : 1;
 }
 
 // The loop gives the worker's event loop a turn (the Web Lock's grant, the channel's messages) while idle: with
@@ -352,6 +421,7 @@ self.onmessage = async (ev) => {
     ctl = new Int32Array(d.ctl); ctlBytes = new Uint8Array(d.ctl);
     argsCap = d.argsWords; strBase = 4 * (ARGS + argsCap);
     slots = d.slots;
+    if (d.svc) { svc = new Int32Array(d.svc); svcBytes = new Uint8Array(d.svc); }
     root = await navigator.storage.getDirectory();
     for (const p of String(d.root).split('/').filter(Boolean)) root = await root.getDirectoryHandle(p, {create: true});
     tab = String(d.tab);
@@ -361,9 +431,17 @@ self.onmessage = async (ev) => {
     channel = new BroadcastChannel(lockName);
     channel.onmessage = (m) => {
       const v = m.data;
-      if (v && v.eveOwner && v.term > Atomics.load(ctl, SEEN_TERM)) {
+      if (!v) return;
+      if (v.eveOwner && v.term > Atomics.load(ctl, SEEN_TERM)) {
         Atomics.store(ctl, SEEN_TERM, v.term);
         self.postMessage({eveOpfsOwner: v.eveOwner, term: v.term});
+      } else if (v.eveCommit) {
+        if (Atomics.load(ctl, ROLE) !== OWNER) { Atomics.add(ctl, COMMITS, 1); Atomics.notify(ctl, COMMITS); }
+      } else if (v.eveCall) {
+        if (Atomics.load(ctl, ROLE) === OWNER) { queue.push(v.eveCall); pump(); }
+      } else if (v.eveReply && v.eveReply.to === tab) {
+        const r = calls.get(v.eveReply.id);
+        if (r) { calls.delete(v.eveReply.id); r(v.eveReply.bytes || new Uint8Array(0)); }
       }
     };
     const owner = await new Promise((resolve) => {

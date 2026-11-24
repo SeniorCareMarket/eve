@@ -6,6 +6,7 @@
    that does and takes over when that tab goes (eve.opfs/owner?, on-role!)."
   (:require
    [eve.opfs :as opfs]
+   [eve.opfs.follow]
    [eve.thread-host :as h]
    [shadow.resource :as rc]))
 
@@ -20,6 +21,7 @@
 (defn- make-pool [{:keys [slots max-file-bytes args-words string-bytes]}]
   #js {:ctl (js/SharedArrayBuffer. (+ (* 4 (+ opfs/ARGS args-words)) string-bytes))
        :argsWords args-words
+       :svc (js/SharedArrayBuffer. (+ 64 (* 4 args-words)))
        :slots (into-array (repeatedly slots #(js/SharedArrayBuffer. 0 #js {:maxByteLength max-file-bytes})))})
 
 (defonce ^:private listeners (atom []))   ; the page's on-role! fns: never on the pool, which workers receive (cloned)
@@ -31,9 +33,18 @@
   (swap! listeners conj f)
   nil)
 
+(defonce ^:private server (atom nil))
+
+(defn- serve-followers!
+  "The owner tab's follower server (eve.opfs.follow/serve!), once."
+  []
+  (when (compare-and-set! server nil :starting)
+    (reset! server (first (h/start-threads! 1 'eve.opfs.follow/serve! {} {})))))
+
 (defn- tell! [^js p role term]
   (set! (.-role p) role)
   (set! (.-term p) term)
+  (when (and (= "owner" role) (.-mounted p)) (serve-followers!))   ; before the mount, ready starts it
   (doseq [f @listeners] (f role term)))
 
 (defn mount!
@@ -60,6 +71,8 @@
                     (.revokeObjectURL js/URL url)
                     (opfs/use-pool! p)
                     (h/share! "eve.opfs" p)
+                    (set! (.-mounted p) true)
+                    (when (= "owner" (.-role p)) (serve-followers!))
                     (resolve p))
                   (when (.-eveOpfsRole d) (tell! p (.-eveOpfsRole d) (.-term d)))
                   (when (.-eveOpfsOwner d) (tell! p "follower" (.-term d)))
@@ -68,4 +81,4 @@
         (set! (.-onerror w) (fn [e] (reject (js/Error. (str "eve.opfs: the io worker failed: " (.-message e))))))
         (set! (.-__eve_opfs_io js/globalThis) w)
         (.postMessage w #js {:eveOpfsBoot true :ctl (.-ctl p) :argsWords (.-argsWords p)
-                             :slots (.-slots p) :root (:root opts) :tab tab}))))))
+                             :slots (.-slots p) :svc (.-svc p) :root (:root opts) :tab tab}))))))

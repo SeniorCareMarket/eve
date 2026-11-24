@@ -33,13 +33,15 @@
 (def ^:private ROLE 10)
 (def ^:private TERM 11)
 (def ^:private SEEN-TERM 12)
+(def ^:private COMMITS 13)
+(def ^:private SEQ 14)
 (def ARGS
   "The request block's first arg word (its header words precede it): eve.opfs.mount sizes the block by it."
   16)
 
 (def ^:private ops
   {:open 1 :persist 2 :exists 3 :size 4 :create-exclusive 5 :rename 6 :delete 7 :close-all 8 :mkdirs 9
-   :persist-changed 10})
+   :persist-changed 10 :follow-call 11})
 
 (defonce ^:private pool (atom nil))
 
@@ -92,40 +94,45 @@
 
 (defn- request!
   "Send op to the io worker and block for its answer: [r0 r1 r2]; throws its error.
-   args: int words (a JS array or nil); strs: strings (joined by NUL)."
-  [op ^js args strs]
-  (let [^js p   (the-pool)
-        ^js ctl (js/Int32Array. (.-ctl p))
-        bytes   (js/Uint8Array. (.-ctl p))
-        nargs   (if args (.-length args) 0)
-        sbytes  (.encode encoder (apply str (interpose "\u0000" strs)))
-        sbase   (* 4 (+ ARGS (.-argsWords p)))]
-    (when (> nargs (.-argsWords p))
-      (throw (ex-info "eve.opfs: a request's args exceed the request block" {:words nargs})))
-    (when (> (.-length sbytes) (- (.-length bytes) sbase))
-      (throw (ex-info "eve.opfs: a request's strings exceed the request block" {:bytes (.-length sbytes)})))
-    (lock! ctl)
-    (try
-      (aset ctl OP (get ops op))
-      (aset ctl NARGS nargs)
-      (dotimes [i nargs] (aset ctl (+ ARGS i) (aget args i)))
-      (aset ctl NSTR (.-length sbytes))
-      (.set bytes sbytes sbase)
-      (js/Atomics.store ctl DONE 0)
-      (js/Atomics.add ctl DOORBELL 1)
-      (js/Atomics.notify ctl DOORBELL)
-      (loop []
-        (when (zero? (js/Atomics.load ctl DONE))
-          (js/Atomics.wait ctl DONE 0 1000)
-          (recur)))
-      (let [status (aget ctl STATUS)]
-        (if (zero? status)
-          [(aget ctl R0) (aget ctl R1) (aget ctl R2)]
-          (let [n (aget ctl NSTR)]
-            (throw (ex-info (str "eve.opfs: " (.decode decoder (.slice bytes sbase (+ sbase n))))
-                            (cond-> {:op op :strs (vec strs)}
-                              (= 2 status) (assoc ::not-owner true)))))))
-      (finally (unlock! ctl)))))
+   args: int words (a JS array or nil); strs: strings (joined by NUL), or raw bytes (a Uint8Array) for the string
+   area. With a reply-bytes atom, the string area's bytes after the answer are put there."
+  ([op args strs] (request! op args strs nil))
+  ([op ^js args strs reply]
+   (let [^js p   (the-pool)
+         ^js ctl (js/Int32Array. (.-ctl p))
+         bytes   (js/Uint8Array. (.-ctl p))
+         nargs   (if args (.-length args) 0)
+         sbytes  (if (instance? js/Uint8Array strs) strs (.encode encoder (apply str (interpose "\u0000" strs))))
+         sbase   (* 4 (+ ARGS (.-argsWords p)))]
+     (when (> nargs (.-argsWords p))
+       (throw (ex-info "eve.opfs: a request's args exceed the request block" {:words nargs})))
+     (when (> (.-length sbytes) (- (.-length bytes) sbase))
+       (throw (ex-info "eve.opfs: a request's strings exceed the request block" {:bytes (.-length sbytes)})))
+     (lock! ctl)
+     (try
+       (aset ctl OP (get ops op))
+       (aset ctl NARGS nargs)
+       (dotimes [i nargs] (aset ctl (+ ARGS i) (aget args i)))
+       (aset ctl NSTR (.-length sbytes))
+       (.set bytes sbytes sbase)
+       (js/Atomics.store ctl DONE 0)
+       (js/Atomics.add ctl DOORBELL 1)
+       (js/Atomics.notify ctl DOORBELL)
+       (loop []
+         (when (zero? (js/Atomics.load ctl DONE))
+           (js/Atomics.wait ctl DONE 0 1000)
+           (recur)))
+       (let [status (aget ctl STATUS)]
+         (if (zero? status)
+           (do (when reply (reset! reply (.slice bytes sbase (+ sbase (aget ctl NSTR)))))
+               [(aget ctl R0) (aget ctl R1) (aget ctl R2)])
+           (let [n (aget ctl NSTR)]
+             (throw (ex-info (str "eve.opfs: " (.decode decoder (.slice bytes sbase (+ sbase n))))
+                             (cond-> {:op op}
+                               (not (instance? js/Uint8Array strs)) (assoc :strs (vec strs))
+                               (= 2 status) (assoc ::not-owner true)
+                               (= 3 status) (assoc ::no-owner true)))))))
+       (finally (unlock! ctl))))))
 
 ;; Ownership (W7): one tab owns a root's files (eve/opfs_io.js holds the Web Lock); a follower tab's requests throw
 ;; (ex-data ::not-owner) until the owner's tab goes and this tab's io worker takes over
@@ -160,6 +167,40 @@
         (cond (= 1 role) true
               (not (pos? left)) false
               :else (do (js/Atomics.wait ctl ROLE role (min left 1000)) (recur)))))))
+
+(defn no-owner?
+  "true when e is a follower's call no owner answered (no owner tab, or one taking over)."
+  [e]
+  (true? (::no-owner (ex-data e))))
+
+(defn call-owner!
+  "A follower tab's call (a worker's): request bytes to the owner tab's follower server (eve.opfs.follow), its
+   reply bytes back; throws (no-owner?) when no owner answers in time, (not-owner?) when this tab is the owner."
+  [^js req]
+  (let [reply (atom nil)]
+    (request! :follow-call #js [] req reply)
+    @reply))
+
+(defn commits
+  "How many owner commits this follower tab has heard of (announced on the channel); an owner's own count of file
+   writes. A value a follower read before the count moved may be stale."
+  []
+  (ctl-word COMMITS))
+
+(defn next-seq!
+  "This tab's next request sequence number (its workers share it)."
+  []
+  (js/Atomics.add (js/Int32Array. (.-ctl ^js (the-pool))) SEQ 1))
+
+(defn tab-id
+  "This tab's id (eve.opfs.mount made it), or nil with no pool."
+  []
+  (some-> (pool-of) .-tab))
+
+(defn svc-block
+  "The owner's svc block (eve/opfs_io.js's S_ words): the follower server's (eve.opfs.follow)."
+  []
+  (.-svc ^js (the-pool)))
 
 ;; The store a region syncs through: a request per batch of runs the block holds
 (deftype IoStore []

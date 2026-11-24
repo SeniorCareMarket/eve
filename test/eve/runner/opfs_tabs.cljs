@@ -3,12 +3,14 @@
    each mounting the pool over one root, so their io workers contend for its Web Lock as tabs do. Tab A owns the
    root and commits to a domain that it never closes; tab B and tab C follow (their requests are refused); A is
    removed (its document, workers and lock gone: a tab that dies); B takes over in the next term, its worker
-   recovers the domain and finds every commit A made; C hears B's term. The page's half (takeover!) answers a map of
+   recovers the domain and finds every commit A made; C hears B's term. Followers (W8): B and C swap through A
+   before it goes (25 each, racing), C reads the total, and after the takeover C's swaps go to B. The page's half (takeover!) answers a map of
    steps for the result; a tab's half (tab!) runs in the iframe."
   (:require
    [cljs.reader :as reader]
    [eve.atom :as atom]
    [eve.opfs :as opfs]
+   [eve.opfs.follow :as follow]
    [eve.opfs.mount :as mount]
    [eve.thread-host :as h]))
 
@@ -47,6 +49,24 @@
     (catch :default e
       (h/send! reply {:op :joined :error (str e) :stack (some-> (.-stack e) (subs 0 1500))}))))
 
+(defn tab-fswap
+  "A worker's entry: swap :count up n times through a follower atom (the owner tab applies them), report the last."
+  [{:keys [reply base n]}]
+  (try
+    (let [a (follow/follower-atom {:id :eve/main :persistent base} nil)
+          end (last (repeatedly n #(swap! a update :count inc)))]
+      (h/send! reply {:op :fswapped :count (:count end) :owner (opfs/owner?)}))
+    (catch :default e
+      (h/send! reply {:op :fswapped :error (str e) :stack (some-> (.-stack e) (subs 0 1500))}))))
+
+(defn tab-fread
+  "A worker's entry: read :count through a follower atom."
+  [{:keys [reply base]}]
+  (try
+    (h/send! reply {:op :fread :count (:count @(follow/follower-atom {:id :eve/main :persistent base} nil))})
+    (catch :default e
+      (h/send! reply {:op :fread :error (str e)}))))
+
 ;; ---- a tab (the iframe's page)
 
 (defn- to-parent! [tab m]
@@ -70,7 +90,9 @@
                                     entry (case cmd
                                             :commit 'eve.runner.opfs-tabs/tab-commit
                                             :probe 'eve.runner.opfs-tabs/tab-probe
-                                            :join 'eve.runner.opfs-tabs/tab-join)]
+                                            :join 'eve.runner.opfs-tabs/tab-join
+                                            :fswap 'eve.runner.opfs-tabs/tab-fswap
+                                            :fread 'eve.runner.opfs-tabs/tab-fread)]
                                 (h/start-threads! 1 entry (assoc (dissoc m :cmd) :reply (h/self)) {})))))
        (fn [e] (to-parent! tab {:op :mount-failed :error (str e)})))))
 
@@ -130,15 +152,27 @@
                  (send-tab! (@frames "B") {:cmd :probe :base base})
                  (wait :b-probe "B" :probed 30000)))
         (.then (fn [m] (step! :b-refused (and (false? (:opened m)) (:not-owner m)) m)
+                 (send-tab! (@frames "B") {:cmd :fswap :base base :n 25})
+                 (send-tab! (@frames "C") {:cmd :fswap :base base :n 25})
+                 (js/Promise.all #js [(wait :b-fswap "B" :fswapped 60000) (wait :c-fswap "C" :fswapped 60000)])))
+        (.then (fn [[b c]] (step! :followers-swap (and (number? (:count b)) (number? (:count c))
+                                                       (= 70 (max (:count b) (:count c))) (not (:owner b)))
+                                  {:b b :c c})
+                 (send-tab! (@frames "C") {:cmd :fread :base base})
+                 (wait :c-fread "C" :fread 30000)))
+        (.then (fn [m] (step! :follower-reads (= 70 (:count m)) m)
                  (send-tab! (@frames "B") {:cmd :join :base base})
                  (.remove (@frames "A"))
                  (js/Promise.all #js [(wait :b-role "B" :role 30000) (wait :c-heard "C" :role 30000)])))
         (.then (fn [[b c]] (step! :b-takes-over (and (= "owner" (:role b)) (= 2 (:term b))) b)
                  (step! :c-hears (and (= "follower" (:role c)) (= 2 (:term c))) c)
                  (wait :b-joins "B" :joined 60000)))
-        (.then (fn [m] (step! :b-recovers (and (:owner m) (= 2 (:term m)) (= 20 (:before m)) (= 21 (:after m))) m)))
+        (.then (fn [m] (step! :b-recovers (and (:owner m) (= 2 (:term m)) (= 70 (:before m)) (= 71 (:after m))) m)
+                 (send-tab! (@frames "C") {:cmd :fswap :base base :n 5})
+                 (wait :c-retargets "C" :fswapped 60000)))
+        (.then (fn [m] (step! :c-retargets (= 76 (:count m)) m)))
         (.catch (fn [e] (step! :error false {:error (str e)})))
         (.then (fn [_]
                  (.removeEventListener js/window "message" listener)
                  (doseq [f (vals @frames)] (.remove f))
-                 {:ok (and (= 8 (count @steps)) (every? second @steps)) :steps @steps})))))
+                 {:ok (and (= 11 (count @steps)) (every? second @steps)) :steps @steps})))))
