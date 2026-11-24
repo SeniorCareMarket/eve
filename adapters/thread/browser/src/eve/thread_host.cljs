@@ -183,21 +183,15 @@
     out))
 
 (defn- host-edn
-  "wire/decode answers a flat handle. ClojureScript's `case` compiles to
-   `instanceof cljs.core.Keyword` then `.fqn`; nbb/SCI cannot invoke a
-   FlatList as a form. Unpack, then walk to interned host
-   keywords/symbols and plain collections, as pr-str / read-string did
-   before eve.wire."
+  "wire/decode answers a flat handle. ClojureScript's `case` compiles
+   to `instanceof cljs.core.Keyword` then `.fqn`; nbb/SCI cannot invoke
+   a FlatList as a form. Unpack materializes interned host keywords
+   and symbols (codec/decode of the symbol table) and plain
+   collections, so the echo-loop dispatches and nbb can read a form.
+   A second intern walk that rebuilt every map and vector is not
+   needed: probed equal to the sent message, with `case` hitting."
   [v]
-  (let [v (if (chunk/flat-handle? v) (chunk/unpack v) v)]
-    (cond
-      (keyword? v) (keyword (namespace v) (name v))
-      (symbol? v) (symbol (namespace v) (name v))
-      (map? v) (into {} (map (fn [[k x]] [(host-edn k) (host-edn x)]) v))
-      (vector? v) (mapv host-edn v)
-      (set? v) (into #{} (map host-edn) v)
-      (seq? v) (doall (map host-edn v))
-      :else v)))
+  (if (chunk/flat-handle? v) (chunk/unpack v) v))
 
 (defn- put! [id payload]
   (let [{:keys [ctl bytes]} (mem)

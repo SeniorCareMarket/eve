@@ -1774,6 +1774,9 @@
     #?(:lpy (or (when-let [bs (eve_flat_pack_plain/pack_value v)]
                   (open bs))
                 (open (pack-rep (to-rep v))))
+       :cljs (or (when-let [bs (pack-plain/pack-value v)]
+                   (open bs))
+                 (open (pack-rep (to-rep v))))
        :default (open (pack-rep (to-rep v))))))
 
 (defn pack-all

@@ -133,23 +133,15 @@
        (fn? (.-postMessage (.-port m)))))
 
 (defn- host-edn
-  "wire/decode answers a flat handle (a FlatMap, a FlatList, a keyword
-   from the chunk's symbol table). ClojureScript's `case` compiles to
-   `instanceof cljs.core.Keyword` then `.fqn`, so a keyword that only
-   `=` a cljs keyword does not dispatch (the conformance echo-loop
-   would never reply). nbb/SCI cannot invoke a FlatList as a form.
-   Unpack, then walk to interned host keywords/symbols and plain
-   collections, as pr-str / read-string did before eve.wire."
+  "wire/decode answers a flat handle. ClojureScript's `case` compiles
+   to `instanceof cljs.core.Keyword` then `.fqn`; nbb/SCI cannot invoke
+   a FlatList as a form. Unpack materializes interned host keywords
+   and symbols (codec/decode of the symbol table) and plain
+   collections, so the echo-loop dispatches and nbb can read a form.
+   A second intern walk that rebuilt every map and vector is not
+   needed: probed equal to the sent message, with `case` hitting."
   [v]
-  (let [v (if (chunk/flat-handle? v) (chunk/unpack v) v)]
-    (cond
-      (keyword? v) (keyword (namespace v) (name v))
-      (symbol? v) (symbol (namespace v) (name v))
-      (map? v) (into {} (map (fn [[k x]] [(host-edn k) (host-edn x)]) v))
-      (vector? v) (mapv host-edn v)
-      (set? v) (into #{} (map host-edn) v)
-      (seq? v) (doall (map host-edn v))
-      :else v)))
+  (if (chunk/flat-handle? v) (chunk/unpack v) v))
 
 (defn- decode-data
   "A data message on a port: eve.wire bytes, or a leftover EDN string."
@@ -187,9 +179,15 @@
       (let [bs (try (wire/encode msg)
                     (catch :default _
                       (throw (ex-info "eve.thread-host: a message to another heap must be data (eve.wire: one flat chunk): a host object is refused"
-                      {:eve.thread/refused :host-object}))))]
+                                      {:eve.thread/refused :host-object}))))]
         (when-let [p (or (get ports addr) (do (drain-ports!) (get (:ports @state) addr)))]
-          (.postMessage p bs)
+          ;; Transfer the chunk's ArrayBuffer when this view owns it, so
+          ;; the structured-clone copy is skipped. A view on a larger
+          ;; (reused) buffer is posted without transfer.
+          (if (and (instance? js/Uint8Array bs)
+                   (== (.-byteLength (.-buffer bs)) (.-byteLength bs)))
+            (.postMessage p bs #js [(.-buffer bs)])
+            (.postMessage p bs))
           (ring! addr)))))
   nil)
 

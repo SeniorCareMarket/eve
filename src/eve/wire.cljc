@@ -20,10 +20,15 @@
    domain, not the wire."
   (:require [eve.flat.chunk :as chunk]
             [eve.deftype-proto.data :as d]
-            [eve.flat.source :as source]))
+            [eve.flat.source :as source]
+            #?(:cljs [eve.flat.pack-plain :as pack-plain])))
 
 (defn- flat-encode [v]
-  (chunk/pack-rep (chunk/to-rep v)))
+  ;; On ClojureScript (and nbb), pack the host value in native JS before
+  ;; to-rep: same FORMAT-V1 bytes, no SCI / to-rep walk on the plain
+  ;; subset. Fall back to pack-rep for bytes, uuid, inst, meta, records.
+  (or #?(:cljs (pack-plain/pack-value v))
+      (chunk/pack-rep (chunk/to-rep v))))
 
 (defn- flat-decode [bs]
   (let [h (chunk/open bs)]
