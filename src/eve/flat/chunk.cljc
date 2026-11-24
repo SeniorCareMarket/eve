@@ -19,8 +19,13 @@
             #?(:clj [eve.crypto :as crypto]
                :cljs [eve.crypto :as crypto]
                :lg [eve.crypto :as crypto]
-               :lpy [eve.crypto :as crypto])
+               :lpy [eve.crypto :as crypto]
+               :cljr [eve.crypto :as crypto]
+               :clje [eve.crypto :as crypto])
+            #?(:clje [eve.host :refer [long alength]])
             [eve.deftype-proto.data :as d]
+            #?@(:cljr [[eve.types :as etypes]
+                       [eve.deftype-proto.vocab :as dtv]])
             [eve.flat.source :as source]
             ;; every read and write of a chunk's bytes (doc/flat/FLAT-IO.md):
             ;; the byte layer that stood in this file moved there (flat lanes U2a)
@@ -87,6 +92,12 @@
                           (and sb (= 2 (nth sb 0))))))
      :clj (instance? byte-array-class x)
      :cljs (instance? js/Uint8Array x)
+     ;; ClojureCLR's byte-array is System.Byte[] (subtype 1); SByte is 2.
+     :cljr (boolean (and (some? x) (.IsArray (class x))
+                         (let [et (str (.GetElementType (class x)))]
+                           (or (= et "System.Byte") (= et "System.SByte")))))
+     :clje (or (instance? eve.host.ByteArray x)
+               (instance? eve.host.ConstByteArray x))
      :default false))
 
 (defn- flat-bytes-of-plain
@@ -109,7 +120,7 @@
    cohost-media demo, 2026-11-16). atom.cljc's digest loop hints
    the same way."
   ^long [bs]
-  (alength ^bytes bs))
+  (alength #?(:clje bs :default ^bytes bs)))
 
 (defn- bytes-range
   "bs[start..end) as a fresh host byte array."
@@ -276,13 +287,19 @@
    ;; default deftype print names the fields, which is what this
    ;; section exists for (reps surface in error messages and debug
    ;; prints); every other host keeps the wrapped value's print.
+   ;; Clojerl is the same: Object/toString is not a deftype method
+   ;; there (and clojure.core has no long, referred from eve.host).
+   :clje (deftype MetaVal [inner meta-rep])
    :default (deftype MetaVal [inner meta-rep]
               ;; A rep carrying metadata prints as the value it wraps: reps surface
               ;; in error messages and debug prints, and the default Object print
               ;; (eve.flat.chunk.MetaVal@hash) hides the value entirely. Basilisp's
               ;; deftype* admits no Object clause — its spelling of the same
-              ;; override is a bare __str__ method.
+              ;; override is a bare __str__ method. ClojureCLR's Object methods
+              ;; are the .NET names (ToString, not toString).
               #?@(:lpy [(__str__ [_] (pr-str inner))]
+                  :cljr [Object
+                         (ToString [_] (pr-str inner))]
                   :default [Object
                             (toString [_] (pr-str inner))])))
 
@@ -463,6 +480,7 @@
               (sequential? v) (apply list (map to-rep v))
               :else (or (convert-rep v) v))
         m #?(:clj (when (instance? clojure.lang.IObj v) (meta v))
+             :cljr (when (instance? clojure.lang.IObj v) (meta v))
              ;; bare IMeta: cljs.core's on the ClojureScript face;
              ;; under squint the ns refer (eve.core's stub) answers it.
              :cljs (when (satisfies? IMeta v) (meta v))
@@ -489,7 +507,7 @@
   (mapv second (sort-by first d/compare-bytes
                         (#?(:jolt mapv :default map)
                          (fn [x] [(try (key-bytes x)
-                                       (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _
+                                       (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :cljr Exception :clje _ :default Throwable) _
                                          (utf8-bytes (pr-str x)))) x]) xs))))
 
 (defn- shaped-keys
@@ -883,6 +901,184 @@
                         type-list)})))
 ))
 
+#?(:cljr (do
+(defn- scan!
+  [rep counts shapes types key?]
+  (cond
+    (or (keyword? rep) (symbol? rep) (string? rep))
+    (let [c (or (get @counts rep) [0 0])
+          c [(inc (nth c 0)) (if key? (inc (nth c 1)) (nth c 1))]]
+      (swap! counts assoc rep c))
+
+    (instance? MetaVal rep)
+    (do (scan! (.-inner rep) counts shapes types key?)
+        (scan! (.-meta-rep rep) counts shapes types false))
+
+    (instance? TypedVal rep)
+    (let [tk [(.-tkey rep) (fp-key (.-fp rep))]
+          fields (.-fields rep)]
+      (when-not (contains? @types tk)
+        (swap! types assoc tk {:i (count @types) :fp (.-fp rep)}))
+      (doseq [[k v] fields] (scan! k counts shapes types true) (scan! v counts shapes types false))
+      (let [ks (sort-by-key-bytes (keys fields)) sk [(:i (get @types tk)) ks]]
+        (when-not (contains? @shapes sk)
+          (swap! shapes assoc sk (count @shapes)))))
+
+    (map? rep)
+    (do (doseq [[k v] rep] (scan! k counts shapes types true) (scan! v counts shapes types false))
+        (when-let [ks (shaped-keys rep)]
+          (when-not (contains? @shapes [nil ks])
+            (swap! shapes assoc [nil ks] (count @shapes)))))
+
+    (instance? BytesVal rep) nil
+    (coll? rep) (doseq [e rep] (scan! e counts shapes types false))
+    :else nil))
+
+(defn- field-class
+  "A type-table field class from the first instance's rep (§6), in
+   this host's number model: an integer is i64's code 10 (ClojureCLR's
+   one fixed integer type), a float64 f64's 9; the rest as on the JVM."
+  [rep types]
+  (cond
+    (instance? TypedVal rep) [:ref (:i (get types [(.-tkey rep) (fp-key (.-fp rep))]))]
+    (instance? BytesVal rep) [:prim 1]
+    (instance? MetaVal rep) (field-class (.-inner rep) types)
+    (coll? rep) [:ser 0]
+    :else [:prim (cond (integer? rep) 10
+                       (float? rep) 9
+                       :else 0)]))
+
+(defn- scan
+  "The chunk context for rep: symbol codes, shapes, types (FORMAT-V1
+   §4, §6). The :types map is keyed by [tkey (fp-key fp)]; write-node!
+   and the batch writer look types up through typed-index."
+  [rep]
+  (let [counts (atom {}) shapes (atom {}) types (atom {})]
+    (scan! rep counts shapes types false)
+    (let [member? (fn [[k c]] (or (keyword? k) (symbol? k)
+                                  (>= (nth c 0) 2) (pos? (nth c 1))))
+          syms (->> (filter member? @counts)
+                    (sort-by (fn [[k c]] [(- (nth c 0)) (str k)]))
+                    (mapv key))
+          shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
+                           (sort-by second (map (fn [e] [(key e) (val e)]) @shapes)))
+          type-list (mapv (fn [[tk t]] {:key (first tk) :fp (:fp t) :tk tk})
+                          (sort-by (fn [[_ t]] (:i t)) @types))
+          instances (atom {})]
+      ;; field classes need one instance per type; find them in the rep
+      (letfn [(find! [r]
+                (cond (instance? TypedVal r)
+                      (let [tk [(.-tkey r) (fp-key (.-fp r))]]
+                        (when-not (contains? @instances tk) (swap! instances assoc tk r))
+                        (doseq [[_ v] (.-fields r)] (find! v)))
+                      (instance? MetaVal r) (find! (.-inner r))
+                      (instance? BytesVal r) nil
+                      (map? r) (doseq [[_ v] r] (find! v))
+                      (coll? r) (doseq [e r] (find! e))
+                      :else nil))]
+        (find! rep))
+      {:sym (zipmap syms (range)) :syms syms
+       :shapes (zipmap (map (fn [s] [(:t s) (:ks s)]) shape-list) (range))
+       :shape-list shape-list
+       :types (zipmap (map :tk type-list) (range))
+       :type-list (mapv (fn [t]
+                          (let [tv (get @instances (:tk t))]
+                            {:key (:key t) :fp (:fp t)
+                             :fields (mapv (fn [k] {:name k
+                                                    :class (field-class (get (.-fields tv) k) @types)})
+                                           (sort-by-key-bytes (keys (.-fields tv))))}))
+                        type-list)})))
+))
+
+#?(:clje (do
+(defn- scan!
+  [rep counts shapes types key?]
+  (cond
+    (or (keyword? rep) (symbol? rep) (string? rep))
+    (let [c (or (get @counts rep) [0 0])
+          c [(inc (nth c 0)) (if key? (inc (nth c 1)) (nth c 1))]]
+      (swap! counts assoc rep c))
+
+    (instance? MetaVal rep)
+    (do (scan! (.-inner rep) counts shapes types key?)
+        (scan! (.-meta-rep rep) counts shapes types false))
+
+    (instance? TypedVal rep)
+    (let [tk [(.-tkey rep) (fp-key (.-fp rep))]
+          fields (.-fields rep)]
+      (when-not (contains? @types tk)
+        (swap! types assoc tk {:i (count @types) :fp (.-fp rep)}))
+      (doseq [[k v] fields] (scan! k counts shapes types true) (scan! v counts shapes types false))
+      (let [ks (sort-by-key-bytes (keys fields)) sk [(:i (get @types tk)) ks]]
+        (when-not (contains? @shapes sk)
+          (swap! shapes assoc sk (count @shapes)))))
+
+    (map? rep)
+    (do (doseq [[k v] rep] (scan! k counts shapes types true) (scan! v counts shapes types false))
+        (when-let [ks (shaped-keys rep)]
+          (when-not (contains? @shapes [nil ks])
+            (swap! shapes assoc [nil ks] (count @shapes)))))
+
+    (instance? BytesVal rep) nil
+    (coll? rep) (doseq [e rep] (scan! e counts shapes types false))
+    :else nil))
+
+(defn- field-class
+  "A type-table field class from the first instance's rep (§6), in
+   this host's number model: an integer is i64's code 10 (let-go's
+   one fixed integer type), a float64 f64's 9; the rest as on the JVM."
+  [rep types]
+  (cond
+    (instance? TypedVal rep) [:ref (:i (get types [(.-tkey rep) (fp-key (.-fp rep))]))]
+    (instance? BytesVal rep) [:prim 1]
+    (instance? MetaVal rep) (field-class (.-inner rep) types)
+    (coll? rep) [:ser 0]
+    :else [:prim (cond (integer? rep) 10
+                       (float? rep) 9
+                       :else 0)]))
+
+(defn- scan
+  "The chunk context for rep: symbol codes, shapes, types (FORMAT-V1
+   §4, §6). The :types map is keyed by [tkey (fp-key fp)]; write-node!
+   and the batch writer look types up through typed-index."
+  [rep]
+  (let [counts (atom {}) shapes (atom {}) types (atom {})]
+    (scan! rep counts shapes types false)
+    (let [member? (fn [[k c]] (or (keyword? k) (symbol? k)
+                                  (>= (nth c 0) 2) (pos? (nth c 1))))
+          syms (->> (filter member? @counts)
+                    (sort-by (fn [[k c]] [(- (nth c 0)) (str k)]))
+                    (mapv key))
+          shape-list (mapv (fn [[k _]] {:t (first k) :ks (second k)})
+                           (sort-by second (map (fn [e] [(key e) (val e)]) @shapes)))
+          type-list (mapv (fn [[tk t]] {:key (first tk) :fp (:fp t) :tk tk})
+                          (sort-by (fn [[_ t]] (:i t)) @types))
+          instances (atom {})]
+      ;; field classes need one instance per type; find them in the rep
+      (letfn [(find! [r]
+                (cond (instance? TypedVal r)
+                      (let [tk [(.-tkey r) (fp-key (.-fp r))]]
+                        (when-not (contains? @instances tk) (swap! instances assoc tk r))
+                        (doseq [[_ v] (.-fields r)] (find! v)))
+                      (instance? MetaVal r) (find! (.-inner r))
+                      (instance? BytesVal r) nil
+                      (map? r) (doseq [[_ v] r] (find! v))
+                      (coll? r) (doseq [e r] (find! e))
+                      :else nil))]
+        (find! rep))
+      {:sym (zipmap syms (range)) :syms syms
+       :shapes (zipmap (map (fn [s] [(:t s) (:ks s)]) shape-list) (range))
+       :shape-list shape-list
+       :types (zipmap (map :tk type-list) (range))
+       :type-list (mapv (fn [t]
+                          (let [tv (get @instances (:tk t))]
+                            {:key (:key t) :fp (:fp t)
+                             :fields (mapv (fn [k] {:name k
+                                                    :class (field-class (get (.-fields tv) k) @types)})
+                                           (sort-by-key-bytes (keys (.-fields tv))))}))
+                        type-list)})))
+))
+
 #?(:lpy (do
 ;; basilisp takes the jank text: the same walk on the same substrate
 ;; (atoms of persistent maps), the same type table. field-class
@@ -1094,6 +1290,8 @@
    ;; let-go: a plain integer is its fixed-width int64 — eve.encoding's
    ;; own word for exactly this (its BigInt is the separate type)
    :lg (defn- plain-integer? [x] (enc/fixed-integer? x))
+   :cljr (defn- plain-integer? [x] (enc/fixed-integer? x))
+   :clje (defn- plain-integer? [x] (enc/fixed-integer? x))
    :lpy (defn- plain-integer? [x] (and (integer? x) (not (or (true? x) (false? x)))))
    :cljs (defn- plain-integer?
            "An integer on this host: a js/BigInt, or an integral JS number
@@ -1120,7 +1318,7 @@
   "[[value run-length] ...] over consecutive distinct values."
   [vals]
   (reduce (fn [rs v]
-            (if (and (seq rs) (#?(:clj = :cljs val= :lg = :lpy val=) v (first (peek rs))))
+            (if (and (seq rs) (#?(:clj = :cljs val= :lg = :lpy val= :cljr = :clje =) v (first (peek rs))))
               (conj (pop rs) [v (inc (second (peek rs)))])
               (conj rs [v 1])))
           [] vals))
@@ -1140,26 +1338,38 @@
 ;; the JVM needs promotion for and ClojureScript needs BigInt for.
 #?(:clj (defn- col-min [present] (reduce min (map long present)))
    :lg (defn- col-min [present] (reduce min (map long present)))
+   :cljr (defn- col-min [present] (reduce min (map long present)))
+   :clje (defn- col-min [present] (reduce min (map long present)))
    :lpy (defn- col-min [present] (reduce min present))
    :cljs (defn- col-min [present] (reduce (fn [a b] (if (bi< b a) b a)) (map bi present))))
 #?(:clj (defn- col-max [present] (reduce max (map long present)))
    :lg (defn- col-max [present] (reduce max (map long present)))
+   :cljr (defn- col-max [present] (reduce max (map long present)))
+   :clje (defn- col-max [present] (reduce max (map long present)))
    :lpy (defn- col-max [present] (reduce max present))
    :cljs (defn- col-max [present] (reduce (fn [a b] (if (bi< a b) b a)) (map bi present))))
 #?(:clj (defn- col-range [mn mx] (-' mx mn))
    :lg (defn- col-range [mn mx] (-' mx mn))
+   :cljr (defn- col-range [mn mx] (-' mx mn))
+   :clje (defn- col-range [mn mx] (- mx mn))
    :lpy (defn- col-range [mn mx] (- mx mn))
    :cljs (defn- col-range [mn mx] (bi- mx mn)))
 #?(:clj (defn- ile [a b] (<= a b))
    :lg (defn- ile [a b] (<= a b))
+   :cljr (defn- ile [a b] (<= a b))
+   :clje (defn- ile [a b] (<= a b))
    :lpy (defn- ile [a b] (<= a b))
    :cljs (defn- ile [a b] (bi<= a b)))
 #?(:clj (def ^:private I32-MIN #?(:jank -2147483648 :default Integer/MIN_VALUE))
    :lg (def ^:private I32-MIN -2147483648)
+   :cljr (def ^:private I32-MIN -2147483648)
+   :clje (def ^:private I32-MIN -2147483648)
    :lpy (def ^:private I32-MIN -2147483648)
    :cljs (def ^:private I32-MIN INT32-MIN))
 #?(:clj (def ^:private I32-MAX #?(:jank 2147483647 :default Integer/MAX_VALUE))
    :lg (def ^:private I32-MAX 2147483647)
+   :cljr (def ^:private I32-MAX 2147483647)
+   :clje (def ^:private I32-MAX 2147483647)
    :lpy (def ^:private I32-MAX 2147483647)
    :cljs (def ^:private I32-MAX INT32-MAX))
 
@@ -1357,7 +1567,7 @@
     (map? rep)
     (if-let [ks (shaped-keys rep)]
       (write-map-node! w cx (get (:shapes cx) [nil ks]) rep)
-      (let [es (mapv (fn [[k v]] [(try (key-bytes k) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil)) k v]) rep)
+      (let [es (mapv (fn [[k v]] [(try (key-bytes k) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :cljr Exception :clje _ :default Throwable) _ nil)) k v]) rep)
             es (sort (fn [a b] (if (and (first a) (first b))
                                  (d/compare-bytes (first a) (first b))
                                  (compare (pr-str (second a)) (pr-str (second b))))) es)
@@ -1520,10 +1730,10 @@
                           ctx (header-ctx out false)
                           hqv (int (or hq
                                        (try (node-hasheq* ctx root)
-                                            (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))
+                                            (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :cljr Exception :clje _ :default Throwable) _ nil))
                                        -2147483648))
                           dg (try (handle-digest ctx root)
-                                  (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))]
+                                  (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :cljr Exception :clje _ :default Throwable) _ nil))]
                       (fio/buf-patch-u32 w 32 hqv)
                       (when dg
                         (fio/buf-seek w 36)
@@ -1615,6 +1825,8 @@
    :cljs (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans])
    ;; let-go: the unhinted arm, as on ClojureScript
    :lg (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans])
+   :cljr (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans])
+   :clje (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans])
    :lpy (deftype Ctx [b bs root wide? syms shapes types decodes rhq rdigest plans]))
 
 (defn- parse-symtab [b ^long at ^long nsym wide?]
@@ -2158,8 +2370,8 @@
     (flat-handle? b) (if (sister-value? b) (= b a) (node-equiv (handle-ctx b) (handle-off b) a))
     (and (not (coll? a)) (not (coll? b))
          (not (host-bytes? a)) (not (host-bytes? b)))
-    (let [ba (try (flat-bytes-of-plain a) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))
-          bb (try (flat-bytes-of-plain b) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))]
+    (let [ba (try (flat-bytes-of-plain a) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :cljr Exception :clje _ :default Throwable) _ nil))
+          bb (try (flat-bytes-of-plain b) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :cljr Exception :clje _ :default Throwable) _ nil))]
       (if (and ba bb) (enc/bytes= ba bb) (= a b)))
     (host-bytes? a)
     (and (host-bytes? b) (enc/bytes= a b))
@@ -2281,7 +2493,7 @@
              ;; cljs: hash the writer's prefix in place (no copy, no byte-vec)
              (sha-vec #?(:cljs (.subarray (fio/buf-raw out) 0 (fio/buf-pos out))
                          :default (buf-bytes-out out))))
-           (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil))))
+           (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :cljr Exception :clje _ :default Throwable) _ nil))))
 
 ;; --- read-value --------------------------------------------------------
 
@@ -2307,7 +2519,7 @@
 (defn eve-digest
   "Eve's content digest of a plain value, or nil when it has none."
   [v]
-  (try (sha-vec (flat-bytes-of-plain v)) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil)))
+  (try (sha-vec (flat-bytes-of-plain v)) (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :cljr Exception :clje _ :default Throwable) _ nil)))
 
 (defn- emit-i32le [out v]
   (fio/buf-u8 out (bit-and v 0xFF)) (fio/buf-u8 out (bit-and (bit-shift-right v 8) 0xFF))
@@ -2521,6 +2733,26 @@
 (defn- map-source? [x] (satisfies? IMapSource x))
 ))
 
+#?(:cljr (do
+(defprotocol IMapSource
+  (-entries [h] "[[key value] ...] with values as scalars or handles")
+  (-lookup [h k nf])
+  (-mcount [h])
+  (-assoc-entry [h k v])
+  (-dissoc-entry [h k]))
+(defn- map-source? [x] (satisfies? IMapSource x))
+))
+
+#?(:clje (do
+(defprotocol IMapSource
+  (-entries [h] "[[key value] ...] with values as scalars or handles")
+  (-lookup [h k nf])
+  (-mcount [h])
+  (-assoc-entry [h k v])
+  (-dissoc-entry [h k]))
+(defn- map-source? [x] (satisfies? IMapSource x))
+))
+
 ;; basilisp reads no :clj arm, so the block above never defines
 ;; IMapSource there; the :lpy section's map handles implement it.
 #?(:lpy (do
@@ -2561,6 +2793,14 @@
              (let [es (-entries x)]
                (emit-magic! out) (fio/buf-u8 out 0xED) (emit-i32le out (count es))
                (doseq [[k v] es] (emit-framed! out k) (emit-framed! out v)))]
+        :cljr [(map-source? x)
+               (let [es (-entries x)]
+                 (emit-magic! out) (fio/buf-u8 out 0xED) (emit-i32le out (count es))
+                 (doseq [[k v] es] (emit-framed! out k) (emit-framed! out v)))]
+        :clje [(map-source? x)
+               (let [es (-entries x)]
+                 (emit-magic! out) (fio/buf-u8 out 0xED) (emit-i32le out (count es))
+                 (doseq [[k v] es] (emit-framed! out k) (emit-framed! out v)))]
         :cljs [(satisfies? IRowHandle x)
                (let [es (row-entries (handle-ctx x) (handle-off x) (-row-index x))]
                  (emit-magic! out) (fio/buf-u8 out 0xED) (emit-i32le out (count es))
@@ -2572,7 +2812,7 @@
   (try (let [out (fio/buf 4)]
          (emit-flat-any! out h)
          (sha-vec (buf-bytes-out out)))
-       (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :default Throwable) _ nil)))
+       (catch #?(:clj Throwable :cljs :default :lpy python/BaseException :cljr Exception :clje _ :default Throwable) _ nil)))
 
 (defn- vec-rep-of [ctx off]
   (mapv (fn [i] (rep-of (elem-at ctx off i))) (range (elem-count ctx off))))
@@ -2677,6 +2917,23 @@
 ;; ("the protocol-host handles"), spelling the same surface through
 ;; the seat's eve.core protocols, the way the seat's other types do.
 ;; The JVM gets the real handle types from these macros.
+#?(:cljr
+   (defn- cljr-deftype-forms
+     "A JVM-shaped deftype body as ClojureCLR takes it (Object method
+      names, java.util.* dropped or rewritten, hinted overloads)."
+     [body]
+     (let [impls (mapv (fn [impl]
+                         (update impl :methods
+                                 (fn [ms]
+                                   (mapv (fn [m] (update m :name #(symbol (name %))))
+                                         ms))))
+                       (dtv/parse-protocol-impls body))]
+       (dtv/impls->forms (etypes/cljr-translate-protos impls)))))
+
+#?(:cljr
+   (defmacro ^:private deftype-cljr [tname fields & body]
+     `(deftype ~tname ~fields ~@(cljr-deftype-forms body))))
+
 #?@(:bb [(defmacro defseqhandle [tname & _]
            `(defn ~(symbol (str "->" tname)) [& ~'args]
               (throw (ex-info "eve.flat handles are not available on this host yet" {}))))]
@@ -2812,7 +3069,134 @@
              clojure.lang.IPersistentCollection
              (cons [this v] (cons-flat this v))
              (empty [_] ())
-             (equiv [this other] (node-equiv ctx off other))]))))])
+             (equiv [this other] (node-equiv ctx off other))]))))]
+    :cljr [(defmacro defseqhandle
+  "A sequential handle over the node at off. nthf/countf/seqf/repf are
+   fns of (ctx off) (nthf also takes i); flags pick the interfaces."
+  [tname fields nthf countf seqf repf & {:keys [vector? stack? list?]}]
+  (let [remake (map (fn [f] (if (= f 'mm) 'm f)) fields)
+        mfields (mapv (fn [f] (cond (#{'_h '_d} f)
+                                    (with-meta f {:unsynchronized-mutable true})
+                                    (= f 'ctx) (with-meta f {:tag 'Ctx})
+                                    :else f)) fields)
+        base-interfaces '[clojure.lang.IHashEq clojure.lang.IObj clojure.lang.Counted
+                          clojure.lang.Seqable clojure.lang.IReduce clojure.lang.IReduceInit
+                          clojure.lang.Indexed java.lang.Iterable
+                          IFlatHandle IHandlePos IFlatDigest]
+        interfaces (cond-> base-interfaces
+                     vector? (into '[clojure.lang.IPersistentVector clojure.lang.Associative
+                                     clojure.lang.ILookup clojure.lang.IPersistentStack
+                                     java.util.List])
+                     list? (into '[clojure.lang.IPersistentList clojure.lang.IPersistentStack
+                                   java.util.List]))
+        body `(~'Object
+       (~'Equals [this# other#] (node-equiv ~'ctx ~'off other#))
+       (~'GetHashCode [this#] (.hasheq this#))
+       (~'ToString [this#] (pr-str (-rep this#)))
+       clojure.lang.IHashEq
+       (hasheq [this#] (let [v# ~'_h] (if (some? v#) (long v#) (let [n# (node-hasheq ~'ctx ~'off)] (set! ~'_h n#) n#))))
+       clojure.lang.IObj
+       (meta [_#] ~'mm)
+       (withMeta [_# m] (new ~tname ~@remake))
+       IAttachMeta
+       (-attach-meta [_# m] (new ~tname ~@remake))
+       (-hmeta [_#] ~'mm)
+       IFlatHandle
+       (-rep [this#] (let [r# (~repf ~'ctx ~'off)]
+                       (if (some? ~'mm) (MetaVal. r# (to-rep ~'mm)) r#)))
+       (-chunk-bytes [_#] (.-bs ~'ctx))
+       IHandlePos
+       (-hctx [_#] ~'ctx)
+       (-hoff [_#] ~'off)
+       IFlatDigest
+       (-digest [this#] (let [d# ~'_d] (if (some? d#) (when-not (identical? d# ::none) d#) (let [v# (handle-digest ~'ctx ~'off)] (set! ~'_d (or v# ::none)) v#))))
+       clojure.lang.Counted
+       (count [_#] (~countf ~'ctx ~'off))
+       clojure.lang.Seqable
+       (seq [this#] (when (pos? (.count this#)) (~seqf ~'ctx ~'off)))
+       clojure.lang.Indexed
+       (nth [this# i#] (let [n# (.count this#)]
+                         (if (and (<= 0 i#) (< i# n#)) (~nthf ~'ctx ~'off i#)
+                             (throw (IndexOutOfBoundsException. (str i#))))))
+       (nth [this# i# nf#] (let [n# (.count this#)]
+                             (if (and (<= 0 i#) (< i# n#)) (~nthf ~'ctx ~'off i#) nf#)))
+       clojure.lang.IReduce
+       (reduce [this# f#] (reduce f# (seq this#)))
+       clojure.lang.IReduceInit
+       (reduce [this# f# init#] (reduce f# init# (seq this#)))
+       java.lang.Iterable
+       (iterator [this#] (clojure.lang.SeqIterator. (or (seq this#) ())))
+       ~@(when vector?
+           '[clojure.lang.IPersistentVector
+             (length [this] (.count this))
+             (assocN [this i v] (assocN-flat this i v))
+             (cons [this v] (cons-flat this v))
+             (pop [this] (pop-flat this))
+             (peek [this] (when (pos? (.count this)) (nth this (dec (.count this)))))
+             clojure.lang.Associative
+             (assoc [this k v] (assocN-flat this (long k) v))
+             (containsKey [this k] (and (integer? k) (<= 0 (long k)) (< (long k) (.count this))))
+             (entryAt [this k] (when (.containsKey this k) (clojure.lang.MapEntry. k (nth this (long k)))))
+             clojure.lang.ILookup
+             (valAt [this k] (if (and (integer? k) (<= 0 (long k)) (< (long k) (.count this)))
+                               (nth this (long k)) nil))
+             (valAt [this k nf] (if (and (integer? k) (<= 0 (long k)) (< (long k) (.count this)))
+                                  (nth this (long k)) nf))
+             clojure.lang.IPersistentCollection
+             (empty [_] [])
+             (equiv [this other] (node-equiv ctx off other))])
+       ~@(when (or vector? list?)
+           '[java.util.List
+             ;; a host List, as APersistentVector/APersistentList are:
+             ;; jolt's native sequential equiv accepts a java.util.List
+             ;; second operand where it accepts no foreign
+             ;; IPersistentVector (measured 2026-11-16, w1b probes), so
+             ;; the handles carry the interface on every host of this
+             ;; family — (= plain flat) is the same question everywhere.
+             (size [this] (.count this))
+             (isEmpty [this] (zero? (.count this)))
+             (^boolean contains [this o] (boolean (some (fn [e] (= e o)) (seq this))))
+             (^objects toArray [this] (object-array (seq this)))
+             (^objects toArray [this ^objects a] (let [n (.count this)]
+                                 (if (< (alength a) n)
+                                   (object-array (seq this))
+                                   (do (dotimes [i n] (aset a i (nth this i)))
+                                       (when (> (alength a) n) (aset a n nil))
+                                       a))))
+             (^boolean add [this o] (throw (UnsupportedOperationException.)))
+             (^boolean addAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
+             (^boolean addAll [this ^int i ^java.util.Collection c] (throw (UnsupportedOperationException.)))
+             (^boolean remove [this o] (throw (UnsupportedOperationException.)))
+             (^boolean removeAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
+             (^boolean retainAll [this ^java.util.Collection c] (throw (UnsupportedOperationException.)))
+             (^boolean containsAll [this ^java.util.Collection c] (every? (fn [o] (.contains this o)) c))
+             (^void clear [this] (throw (UnsupportedOperationException.)))
+             (get [this ^int i] (nth this i))
+             (set [this ^int i o] (throw (UnsupportedOperationException.)))
+             (^void add [this ^int i o] (throw (UnsupportedOperationException.)))
+             (remove [this ^int i] (throw (UnsupportedOperationException.)))
+             (indexOf [this o] (int (loop [i 0]
+                                 (cond (== i (.count this)) -1
+                                       (= (nth this i) o) i
+                                       :else (recur (inc i))))))
+             (lastIndexOf [this o] (int (loop [i (dec (.count this))]
+                                     (cond (neg? i) -1
+                                           (= (nth this i) o) i
+                                           :else (recur (dec i))))))
+             (^java.util.ListIterator listIterator [this] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this)))))
+             (^java.util.ListIterator listIterator [this ^int i] (.listIterator (java.util.Collections/unmodifiableList (java.util.ArrayList. ^java.util.Collection (seq this))) i))
+             (^java.util.List subList [this ^int s ^int e] (java.util.Collections/unmodifiableList
+                                  (java.util.ArrayList. ^java.util.Collection (map (fn [i] (nth this i)) (range s e)))))])
+       ~@(when list?
+           '[clojure.lang.IPersistentList
+             (peek [this] (when (pos? (.count this)) (nth this 0)))
+             (pop [this] (pop-flat this))
+             clojure.lang.IPersistentCollection
+             (cons [this v] (cons-flat this v))
+             (empty [_] ())
+             (equiv [this other] (node-equiv ctx off other))]))
+        forms (cljr-deftype-forms body)]
+    `(deftype ~tname ~mfields ~@forms)))])
 
 #?@(:bb [(defmacro defmaphandle [tname & _]
            `(defn ~(symbol (str "->" tname)) [& ~'args]
@@ -2955,7 +3339,140 @@
        (^void clear [_#] (throw (UnsupportedOperationException.)))
        (keySet [this#] (into #{} (map (fn [e#] (nth e# 0))) (-entries this#)))
        (values [this#] (into [] (map (fn [e#] (nth e# 1))) (-entries this#)))
-       (entrySet [this#] (into #{} (map (fn [e#] (clojure.lang.MapEntry. (nth e# 0) (nth e# 1))) (-entries this#)))))))])
+       (entrySet [this#] (into #{} (map (fn [e#] (clojure.lang.MapEntry. (nth e# 0) (nth e# 1))) (-entries this#)))))))]
+    :cljr [(defmacro defmaphandle
+  "A map handle as a deftype over the node — one construction for
+   every host of this family, replacing the proxy over
+   APersistentMap. The proxy's generated subclass is a real
+   APersistentMap on the JVM, but on jolt proxy materializes as a
+   reify that extends nothing, and jolt's native collection
+   dispatch has no arm for the reify class (measured 2026-11-16,
+   w1b probes: (count proxy) throws \"count not supported on this
+   type\", (map? proxy) is false, (instance? Counted proxy) true
+   yet uncountable). A deftype is a real class on both hosts, and
+   the handle implements the full map surface — IPersistentMap
+   plus java.util.Map, the interfaces APersistentMap itself
+   carries — so host dispatch reaches it by the same interfaces
+   it reaches a plain map with (on the JVM, APersistentMap.equals
+   accepts any java.util.Map; a minimal deftype IPersistentMap
+   without java.util.Map fails (.equiv plain flat), measured).
+   The macro defines the deftype; its positional constructor is
+   the ->Flat* factory. _h/_d are the hash/digest caches,
+   unsynchronized-mutable fields seeded from the factory's args.
+   entries/lookup/count are forms over the field names (lookup's
+   form may use k and nf); repf/digestf are fns of the handle,
+   assocf/dissocf fns of (handle k v)/(handle k). toString is
+   hand-rolled from the entries, as the proxy's was: hosts that
+   print a handle through its toString must terminate."
+  [tname fields entries lookup countf repf digestf assocf dissocf & {:keys [record? row? generic?]}]
+  (let [factory (symbol (str "->" tname))
+        mfields (mapv (fn [f] (cond (#{'_h '_d} f)
+                                    (with-meta f {:unsynchronized-mutable true})
+                                    (= f 'ctx) (with-meta f {:tag 'Ctx})
+                                    :else f)) fields)
+        wm-args (map (fn [f] (case f mm 'm f)) fields)
+        ifaces (cond-> '[eve.flat.chunk.IFlatHandle eve.flat.chunk.IHandlePos
+                         eve.flat.chunk.IFlatDigest eve.flat.chunk.IMapSource
+                         eve.flat.chunk.IAttachMeta
+                         ;; Clojure's map-equivalence marker:
+                         ;; APersistentMap.equiv rejects an
+                         ;; IPersistentMap that does not carry it
+                         ;; (clojure-1.12.0 APersistentMap.java:140),
+                         ;; so (= plain flat) is false without it.
+                         clojure.lang.MapEquivalence]
+                 record? (conj 'eve.flat.chunk.IRecordInfo)
+                 row? (conj 'eve.flat.chunk.IRowHandle)
+                 generic? (conj 'eve.flat.chunk.IGenericRecord))
+        body `(~'Object
+       (~'Equals [this# other#] (map-equiv-of this# other#))
+       (~'GetHashCode [this#] (.hasheq this#))
+       (~'ToString [this#] (str "{" (apply str (interpose ", " (map (fn [e#] (str (pr-str (nth e# 0)) " " (pr-str (nth e# 1)))) (-entries this#)))) "}"))
+       clojure.lang.IHashEq
+       (hasheq [this#] (let [v# ~'_h]
+                         (if (some? v#) (long v#)
+                             (let [n# (entries-hasheq this#)] (set! ~'_h n#) n#))))
+       clojure.lang.IObj
+       (meta [_#] ~'mm)
+       (withMeta [_# ~'m] (~factory ~@wm-args))
+       eve.flat.chunk.IAttachMeta
+       (-attach-meta [_# ~'m] (~factory ~@wm-args))
+       (-hmeta [_#] ~'mm)
+       eve.flat.chunk.IFlatHandle
+       (-rep [this#] (let [r# (~repf this#)]
+                       (if (some? ~'mm) (MetaVal. r# (to-rep ~'mm)) r#)))
+       (-chunk-bytes [_#] (.-bs ~'ctx))
+       eve.flat.chunk.IHandlePos
+       (-hctx [_#] ~'ctx)
+       (-hoff [_#] ~'off)
+       eve.flat.chunk.IFlatDigest
+       (-digest [this#] (let [d# ~'_d]
+                          (if (some? d#) (when-not (identical? d# ::none) d#)
+                              (let [v# (~digestf this#)] (set! ~'_d (or v# ::none)) v#))))
+       eve.flat.chunk.IMapSource
+       (-entries [_#] ~entries)
+       (-lookup [_# ~'k ~'nf] ~lookup)
+       (-mcount [_#] ~countf)
+       (-assoc-entry [this# k# v#] (~assocf this# k# v#))
+       (-dissoc-entry [this# k#] (~dissocf this# k#))
+       ~@(when record?
+           '[eve.flat.chunk.IRecordInfo
+             (-tkey [_] tkey)
+             (-fp [_] fp)])
+       ~@(when row?
+           '[eve.flat.chunk.IRowHandle
+             (-row-index [_] row)])
+       clojure.lang.IPersistentMap
+       (assoc [this# k# v#] (-assoc-entry this# k# v#))
+       (assocEx [this# k# v#] (if (.containsKey this# k#)
+                                (throw (Exception. "Key already present"))
+                                (-assoc-entry this# k# v#)))
+       (without [this# k#] (-dissoc-entry this# k#))
+       (iterator [this#] (clojure.lang.SeqIterator. (or (seq this#) ())))
+       clojure.lang.Associative
+       (containsKey [this# k#] (not (identical? ::absent (-lookup this# k# ::absent))))
+       (entryAt [this# k#] (let [v# (-lookup this# k# ::absent)]
+                             (when-not (identical? ::absent v#) (clojure.lang.MapEntry. k# v#))))
+       clojure.lang.IPersistentCollection
+       (count [this#] (int (-mcount this#)))
+       (cons [this# o#] (cond (instance? clojure.lang.MapEntry o#)
+                              (-assoc-entry this# (.key ^clojure.lang.MapEntry o#) (.val ^clojure.lang.MapEntry o#))
+                              (vector? o#)
+                              (if (== 2 (count o#)) (-assoc-entry this# (nth o# 0) (nth o# 1))
+                                  (throw (IllegalArgumentException. "Vector arg to map conj must be a pair")))
+                              (instance? System.Collections.IDictionary o#)
+                              (reduce (fn [mm# k#] (-assoc-entry mm# k# (.get_Item ^System.Collections.IDictionary o# k#)))
+                                      this# (seq (.get_Keys ^System.Collections.IDictionary o#)))
+                              :else
+                              (reduce (fn [mm# e#] (-assoc-entry mm# (key e#) (val e#))) this# o#)))
+       (empty [_#] {})
+       (equiv [this# other#] (map-equiv-of this# other#))
+       clojure.lang.ILookup
+       (valAt [this# k#] (-lookup this# k# nil))
+       (valAt [this# k# nf#] (-lookup this# k# nf#))
+       clojure.lang.Seqable
+       (seq [this#] (when (pos? (.count this#))
+                      (seq (map (fn [e#] (clojure.lang.MapEntry. (nth e# 0) (nth e# 1))) (-entries this#)))))
+       clojure.lang.IFn
+       (invoke [this# k#] (-lookup this# k# nil))
+       (invoke [this# k# nf#] (-lookup this# k# nf#))
+       clojure.lang.IReduce
+       (reduce [this# f#] (reduce f# (seq this#)))
+       clojure.lang.IReduceInit
+       (reduce [this# f# init#] (reduce f# init# (seq this#)))
+       java.util.Map
+       (size [this#] (int (-mcount this#)))
+       (isEmpty [this#] (zero? (-mcount this#)))
+       (containsValue [this# v#] (boolean (some (fn [e#] (= (nth e# 1) v#)) (-entries this#))))
+       (get [this# k#] (-lookup this# k# nil))
+       (put [_# _k# _v#] (throw (UnsupportedOperationException.)))
+       (remove [_# _k#] (throw (UnsupportedOperationException.)))
+       (putAll [_# _m#] (throw (UnsupportedOperationException.)))
+       (^void clear [_#] (throw (UnsupportedOperationException.)))
+       (keySet [this#] (into #{} (map (fn [e#] (nth e# 0))) (-entries this#)))
+       (values [this#] (into [] (map (fn [e#] (nth e# 1))) (-entries this#)))
+       (entrySet [this#] (into #{} (map (fn [e#] (clojure.lang.MapEntry. (nth e# 0) (nth e# 1))) (-entries this#)))))
+        forms (cljr-deftype-forms body)]
+    `(deftype ~tname ~mfields ~@forms)))])
 
 ;; --- the sequential handles ----------------------------------------------
 
@@ -3071,6 +3588,71 @@
   (equals [_ other] (node-equiv ctx off other))
   (hashCode [this] (.hasheq this))
   (toString [_] (str "#{" (apply str (interpose " " (map pr-str (set-elements ctx off)))) "}"))
+  clojure.lang.IHashEq
+  (hasheq [_] (let [v _h]
+                (if (some? v) (long v)
+                    (let [n (node-hasheq ctx off)] (set! _h n) n))))
+  clojure.lang.IObj
+  (meta [_] mm)
+  (withMeta [_ m] (->FlatSet ctx off m _h _d))
+  clojure.lang.IPersistentSet
+  (disjoin [this v] (disjoin-flat this v))
+  (contains [_ v] (boolean (some (fn [e] (= e v)) (set-elements ctx off))))
+  (get [_ v] (some (fn [e] (when (= e v) e)) (set-elements ctx off)))
+  clojure.lang.IPersistentCollection
+  (count [_] (int (first (set-parts ctx off))))
+  (cons [this v] (cons-flat this v))
+  (empty [_] #{})
+  (equiv [_ other] (node-equiv ctx off other))
+  clojure.lang.Seqable
+  (seq [this] (when (pos? (.count this)) (seq (set-elements ctx off))))
+  clojure.lang.IFn
+  (invoke [this v] (.get this v))
+  clojure.lang.IReduce
+  (reduce [this f] (reduce f (seq this)))
+  clojure.lang.IReduceInit
+  (reduce [this f init] (reduce f init (seq this)))
+  java.lang.Iterable
+  (iterator [this] (clojure.lang.SeqIterator. (or (seq this) ())))
+  java.util.Set
+  (size [this] (.count this))
+  (isEmpty [this] (zero? (.count this)))
+  (^objects toArray [this] (object-array (seq this)))
+  (^objects toArray [this ^objects a] (let [n (.count this)]
+                      (if (< (alength a) n)
+                        (object-array (seq this))
+                        (do (dotimes [i n] (aset a i (nth (seq this) i)))
+                            (when (> (alength a) n) (aset a n nil))
+                            a))))
+  (add [_ _v] (throw (UnsupportedOperationException.)))
+  (remove [_ _v] (throw (UnsupportedOperationException.)))
+  (containsAll [this c] (every? (fn [v] (.contains this v)) c))
+  (addAll [_ _c] (throw (UnsupportedOperationException.)))
+  (removeAll [_ _c] (throw (UnsupportedOperationException.)))
+  (retainAll [_ _c] (throw (UnsupportedOperationException.)))
+  (clear [_] (throw (UnsupportedOperationException.))))]
+    :cljr [(deftype-cljr FlatSet [^Ctx ctx off mm ^:unsynchronized-mutable _h ^:unsynchronized-mutable _d]
+  ;; a deftype, not a proxy over APersistentSet, for the same
+  ;; reason as the map handles (defmaphandle): the interfaces
+  ;; carry the surface on every host of this family.
+  eve.flat.chunk.IFlatHandle
+  (-rep [_] (let [r (into #{} (map rep-of) (set-elements ctx off))]
+              (if (some? mm) (MetaVal. r (to-rep mm)) r)))
+  (-chunk-bytes [_] (.-bs ctx))
+  eve.flat.chunk.IHandlePos
+  (-hctx [_] ctx)
+  (-hoff [_] off)
+  eve.flat.chunk.IFlatDigest
+  (-digest [_] (let [d _d]
+                 (if (some? d) (when-not (identical? d ::none) d)
+                     (let [v (handle-digest ctx off)] (set! _d (or v ::none)) v))))
+  eve.flat.chunk.IAttachMeta
+  (-attach-meta [_ m] (->FlatSet ctx off m _h _d))
+  (-hmeta [_] mm)
+  Object
+  (Equals [_ other] (node-equiv ctx off other))
+  (GetHashCode [this] (.hasheq this))
+  (ToString [_] (str "#{" (apply str (interpose " " (map pr-str (set-elements ctx off)))) "}"))
   clojure.lang.IHashEq
   (hasheq [_] (let [v _h]
                 (if (some? v) (long v)
@@ -6340,7 +6922,7 @@
        ;; names nothing an SCI host evaluating this file can resolve,
        ;; and the body already discriminates on the ex-data type and
        ;; rethrows everything else.
-       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs :default :lpy basilisp.lang.exception/ExceptionInfo) e
+       (catch #?(:jank Throwable :clj clojure.lang.ExceptionInfo :cljs :default :lpy basilisp.lang.exception/ExceptionInfo :cljr clojure.lang.ExceptionInfo :clje _) e
          (if (= ::append-overflow (:type (ex-data e)))
            nil
            (throw e)))))
@@ -6414,7 +6996,10 @@
   (let [ctx (handle-ctx h) off (handle-off h) t (tag-at ctx off) vr (to-rep v)
         n (elem-count ctx off)]
     (cond
-      (or (< i 0) (> i n)) (throw #?(:cljs (js/Error. (str i)) :default (IndexOutOfBoundsException. (str i))))
+      (or (< i 0) (> i n)) (throw #?(:cljs (js/Error. (str i))
+                    :cljr (IndexOutOfRangeException. (str i))
+                    :clje (ex-info (str i) {})
+                    :default (IndexOutOfBoundsException. (str i))))
       (== i n) (cons-flat h v)
       (== t 0x22)
       (or (when (appendable? ctx vr)
@@ -6434,6 +7019,8 @@
         (if (empty? offs)
           (throw #?(:jank (ex-info "Can't pop empty vector" {})
                     :cljs (js/Error. "Can't pop empty vector")
+                    :cljr (InvalidOperationException. "Can't pop empty vector")
+                    :clje (ex-info "Can't pop empty vector" {})
                     :default (IllegalStateException. "Can't pop empty vector")))
           (or (append-attempt
                (fn [] (let [w (grown-buf ctx)
@@ -6445,6 +7032,8 @@
         (if (empty? offs)
           (throw #?(:jank (ex-info "Can't pop empty list" {})
                     :cljs (js/Error. "Can't pop empty list")
+                    :cljr (InvalidOperationException. "Can't pop empty list")
+                    :clje (ex-info "Can't pop empty list" {})
                     :default (IllegalStateException. "Can't pop empty list")))
           (or (append-attempt
                (fn [] (let [w (grown-buf ctx)

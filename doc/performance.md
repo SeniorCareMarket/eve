@@ -30,13 +30,16 @@ PersistentIntMap was removed. The cross-host table is in
 **ClojureCLR** — .NET 8.0.428 and Clojure.Main 1.12.6 are on this box
 and the portable flat-io `:cljr` arm plus its conformance test pass
 (11 / 264 / 0 / 0, 2026-11-24 12:04 AM ET). Official `bb test:cljr`
-and `cljr -m eve.runner.cljr-main perf` still die at compile in
-`eve.flat.chunk` (`Object/toString` on `MetaVal`).
+now loads and runs (16 of 22 started namespaces clean on 2026-11-24
+12:38–12:46 AM ET; remaining failures in
+[clojureclr.md](hosts/clojureclr.md)). `cljr -m eve.runner.cljr-main
+perf` has not been re-run at this pin.
 
 **clojerl** — the portable flat-io `:clje` arm plus its conformance
-test pass (11 / 260 / 0 / 0, 2026-11-24 12:07 AM ET). Official
-`bb test:clje` and `clojerl … -m eve.runner.clje-main perf` still die
-at compile in `eve.flat.chunk:103` (`long` unresolved).
+test pass (11 / 260 / 0 / 0, 2026-11-24 12:07 AM ET). This batch
+refers `long`/`alength` from `eve.host` on `:clje`; official
+`bb test:clje` was not re-run and the Clojerl handle macros are still
+unported, so the official suite is not expected to compile yet.
 
 ### JVM — J, 2026-11-23 22:42:07–22:42:37 ET, exit 0, 30 s wall, load1 2.63→3.00, Eve `f329fc4`
 
@@ -234,11 +237,11 @@ these write shapes, at this pin.
 
 - **ClojureCLR host suite** — .NET 8.0.428 and Clojure.Main 1.12.6 are
   installed; flat-io conformance is 11 / 264 / 0 / 0. Official
-  `bb test:cljr` dies at compile in `eve.flat.chunk` (`Object/toString`
-  on `MetaVal`; CLR wants `ToString` / `Equals` / `GetHashCode`).
+  `bb test:cljr` loads and runs (16 of 22 started namespaces clean;
+  remaining failures in [clojureclr.md](hosts/clojureclr.md)).
 - **clojerl host suite** — flat-io conformance is 11 / 260 / 0 / 0.
-  Official `bb test:clje` dies at compile in `eve.flat.chunk:103`
-  (`long` unresolved).
+  The `:clje` `long`/`alength` refer is in this batch; official
+  `bb test:clje` was not re-run and handle macros are still unported.
 - **browser `thread-submit-64`** — 20.5 ms on this tree (was 140.0 ms
   after the MessagePort fix); 3.3 ms on this box at `77b649aa5`. The
   remaining gap vs October is `70e6f4c8` (eve.wire FORMAT-V1 on the

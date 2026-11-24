@@ -86,7 +86,7 @@
   bench:nbb {:doc "The columnar bench on nbb"
              :task (shell "nbb" "--classpath" (str/join ":" (roots :nbb "test")) "-m" "eve.runner.nbb-main" "bench")}
   test:cljr {:doc "The shared (.cljc) tests on ClojureCLR (namespaces named after the task run alone)"
-             :task (apply shell {:extra-env (cond-> {"CLOJURE_LOAD_PATH" (str/join ":" (roots :cljr "test"))}
+             :task (apply shell {:extra-env (cond-> {"CLOJURE_LOAD_PATH" (str/join ":" (roots :cljr "test" "apps/network-atoms/test" "apps/aegis/test"))}
                                               (dotnet-root) (assoc "DOTNET_ROOT" (dotnet-root)))}
                           "cljr" "-m" "eve.runner.cljr-main" "test" *command-line-args*)}
   test:lpy  {:doc "The shared (.cljc) tests on basilisp, compiled afresh into target/lpycache-test (basilisp's namespace cache checks a namespace's own source, not the macros it expanded). Its roots are given in reverse: basilisp searches the last -p first, and src must come before test (test/eve/deftype/ would otherwise make eve.deftype an empty namespace package)"
@@ -271,5 +271,5 @@
   test:browser:dom-demo {:doc "eve.dom's acceptance demo in headless Chromium: reagami + canvas-confetti in main's worker"
                          :task (shell {:extra-env {"EVE_BROWSER_SUITE" "dom-demo"}} "bb" "test:browser")}
   test:clje {:doc "The shared (.cljc) tests on clojerl (eve's NIF is built on first load into adapters/core/beam/target/clje/)"
-             :task (apply shell "clojerl" (concat (mapcat (fn [r] ["-pa" r]) (roots :clje "test"))
+             :task (apply shell "clojerl" (concat (mapcat (fn [r] ["-pa" r]) (roots :clje "test" "apps/network-atoms/test" "apps/aegis/test"))
                                                   ["-m" "eve.runner.clje-main" "test"] *command-line-args*))}}}

@@ -200,11 +200,6 @@
    :object-boilerplate? true
    :slab-define define})
 
-(defn host-type
-  "A plain type written with the JVM's names (host-deftype)."
-  [_env type-name fields parsed]
-  `(clojure.core/deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos parsed))))
-
 (defn plain-type
   "A plain type (eve.deftype/deftype)."
   [_env type-name fields parsed]
@@ -213,6 +208,17 @@
     `(do (clojure.core/deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos impls)))
          ~@(when print [(sio/print-method-form type-name print)])
          ~type-name)))
+
+(defn host-type
+  "A plain type written with the JVM's names (host-deftype). Reserved
+   field names (__hash and siblings) are renamed: ClojureCLR rejects
+   them, as the JVM's deftype does in vocab's jvm-field-renames.
+   Interface translation of ClojureScript protocol heads stays with
+   plain-type / eve-deftype; this entry point keeps the raw parsed
+   impls plus cljr-translate-protos (java.util.* / Object methods)."
+  [_env type-name fields parsed]
+  (let [[fields parsed] (sio/plain-renames fields parsed nil)]
+    `(clojure.core/deftype ~type-name ~fields ~@(impls->forms (cljr-translate-protos parsed)))))
 
 (defn slab-type "An eve/deftype type (eve.deftype-proto.macros/deftype)." [m] (sio/slab-type m (hooks)))
 (defn eve-type "An eve-deftype (eve.deftype.macros/eve-deftype*)." [ctx] (sio/eve-type ctx (hooks)))

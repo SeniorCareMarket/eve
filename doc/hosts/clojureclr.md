@@ -17,6 +17,7 @@ CLOJURE_LOAD_PATH=... cljr -m eve.runner.cljr-main perf     # the performance su
 
 | Run | Result | When (ET) |
 |---|---|---|
+| `bb test:cljr` | Official shared suite **loads and runs**. 22 namespaces started; 16 clean (clock-uuid, associative-transient, hamt-util, eve-bytes-fixture, numeric-tags, overflow, collection-hash, reference-tag, big-value, sorted-coll, keyring, value-buffer, vec-retire, reclaim, tally, domain-open). 6 failed (90 ERROR, 7 FAIL) before the run was killed mid `eve.rrb-vector-test` `test-splicing`: `eve.numeric-test` 57E/3F (including String→BigInteger in optional-arithmetic); `eve.type-io-test` 6E/2F (tagged print/read — "No reader function for tag object", print as `#object[...]`); `eve.record-test` 1E/2F; `eve.deftype.type-id-test` 4E; `eve.sorted-migration-test` 2E; `eve.rrb-vector-test` 20E (`RRBChunkedSeq` is not `clojure.lang.ISeq`; slab-domain: "An Eve value allocated in a different slab domain cannot be put in this one" on VectorNode during withMeta / pack-all / deliver-flat). `eve.thread-*` and `eve.net.crypto-fast-path-test` did not run. Not green. | 2026-11-24, 12:38–12:46 AM ET, this tree (compile-complete `eve.flat.chunk` / `eve.flat.freeze` port) |
 | `bb test:cljr` | **202 tests, 4,499 assertions, 0 failures, 0 errors** (188 s, peak 958 MB, the process tree) | 2026-10-21, this tree (the final pass) |
 | `bb scripts/thread-rendezvous.clj jvm cljr` | 18 of 18 checks (51 s) | 2026-10-22, this tree (the final pass) |
 | `bb test:cljr` | **188 tests, 2,907 assertions, 0 failures, 0 errors** (203 s, peak 773 MB) | 2026-10-20, the final sweep, ClojureCLR 1.12.6 on .NET 8 |
@@ -29,6 +30,9 @@ the red-black set, int-map, sorted collections, core.rrb-vector's suite, big val
 numeric and reference tags, collection hashing, the vector retire walk, transient reclaim, the tally, domain open, and
 the whole thread feature
 including the network rung. Not run: the four typed-array suites — ClojureCLR has no typed-array adapter yet.
+On 2026-11-24 the official battery loads through `eve.domain-open-test`; the six failing namespaces and the
+thread/net namespaces that did not run in that pass are in the table above. October's green counts are historical
+and are not the current official result.
 
 ## Performance
 
@@ -45,10 +49,10 @@ including the network rung. Not run: the four typed-array suites — ClojureCLR 
 | `disk-swap-counter` | — | — | — |
 | `thread-submit-64` | — | — | — |
 
-Not re-run: .NET 8.0.428 and Clojure.Main 1.12.6 are installed (`/workspace/tools/dotnet`, `cljr` on PATH). The portable flat-io `:cljr` arm landed; `eve.flat-io-conformance-test` is 11 tests / 264 assertions, 0 failures, 0 errors (2026-11-24 12:04 AM ET). Official `bb test:cljr` and `cljr -m eve.runner.cljr-main perf` still die at compile in `eve.flat.chunk` (`Object/toString` on `MetaVal`; CLR requires `ToString` / `Equals` / `GetHashCode`, and that file has many such sites). Previous numbers are not carried forward.
+Not re-run: .NET 8.0.428 and Clojure.Main 1.12.6 are installed (`/workspace/tools/dotnet`, `cljr` on PATH). The portable flat-io `:cljr` arm landed; `eve.flat-io-conformance-test` is 11 tests / 264 assertions, 0 failures, 0 errors (2026-11-24 12:04 AM ET). Official `bb test:cljr` now loads and executes the shared suite (16 of 22 started namespaces clean; remaining failures in the Correctness table). `cljr -m eve.runner.cljr-main perf` has not been re-run at this pin. Previous numbers are not carried forward.
 <!-- /perf:cljr -->
 
-The table above was not re-run on this box (`eve.flat.chunk` still does not compile on CLR). The paragraph below describes the 2026-10-21 release-box table, kept as qualitative context only.
+The table above was not re-run on this box (no official `perf-all` at this pin). The paragraph below describes the 2026-10-21 release-box table, kept as qualitative context only.
 
 Reading it: the fastest host outside the JVM and V8 on swaps (92.1 µs, 33.6 µs for a 1,000-key map's), and faster
 than ClojureScript on encoding a 1,000-element vector (9.1 ms against 11.5 ms). A small deref (89.7 µs) costs as much as
