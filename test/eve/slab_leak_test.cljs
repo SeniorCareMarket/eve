@@ -4,7 +4,8 @@
    after swap! operations, causing monotonic slab usage growth.
 
    Run via: node target/eve-test/all.js slab-leak"
-  (:require [cljs.test :refer [deftest testing is async]]
+  (:require [cljs.test :refer [deftest testing is async use-fixtures]]
+            [eve.test-scratch :as scratch]
             [eve.atom :as atom]
             [eve.deftype-proto.alloc :as alloc]
             [eve.process-slab :as ps]
@@ -13,7 +14,10 @@
             [eve.vec :as eve-vec]
             [eve.set :as eve-set]))
 
-(def ^:private test-base (str "/tmp/eve-leak-test-" (js/Date.now)))
+(def ^:private root (scratch/unique-dir "leak-test"))
+(def ^:private test-base (str root "/d"))
+
+(use-fixtures :once (scratch/once-dir-fixture root))
 
 (defn- total-used-blocks
   "Sum of used-count across all 6 bitmap slab classes."

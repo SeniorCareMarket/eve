@@ -9,16 +9,20 @@
    the delta (:reuse-from reuses unchanged windows), the Lustre
    variant, :segment-bytes validation, and heap regions (a single
    segment) unchanged.  Design: docs/eve-region-segmentation/REPORT.md."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.test-scratch :as scratch]
             [eve.mem :as m]
             [eve.region :as r])
-  (:import [java.io File]
-           [java.util Arrays]))
+  (:import [java.util Arrays]))
+
+(def ^:private scratch-paths (atom []))
 
 (defn- tmp-path []
-  (let [f (File/createTempFile "eve-seg-test" ".bin")]
-    (.delete f)
-    (.getAbsolutePath f)))
+  (let [p (scratch/unique-file "seg-test" ".bin")]
+    (swap! scratch-paths conj p)
+    p))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [p @scratch-paths] (scratch/delete-base! p))))))
 
 (deftest heap-region-is-one-segment
   (let [h (r/make-heap-region 1024)]

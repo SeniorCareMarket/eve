@@ -20,9 +20,10 @@
       failed attempt leaves behind (the Z3.4 leak class) is printed
       from both the live domain and the reopened one, with the
       value-side facts asserted."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [eve.atom :as a]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.mem :as mem]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.data :as d]
@@ -40,9 +41,14 @@
 ;; test/eve/jvm_atom_lost_attempt_test.clj and the T1 probes count).
 ;; ---------------------------------------------------------------------------
 
+(def ^:private scratch-bases (atom []))
+
 (defn- fresh-base []
-  (str (System/getProperty "java.io.tmpdir")
-       "/eve-flat-journal-" (rand-int 1000000000) "/d"))
+  (let [b (scratch/unique-base "flat-journal")]
+    (swap! scratch-bases conj b)
+    b))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [b @scratch-bases] (scratch/delete-base! b))))))
 
 (defn- jpos
   "The domain's journal position: the jlog's next seq (stripe 0) — it moves

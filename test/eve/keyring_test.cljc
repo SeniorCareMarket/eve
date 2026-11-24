@@ -12,7 +12,7 @@
    each computed by an independent model (Python's hmac, hashlib and cryptography, 2026-10-18)."
   ;; the codec's ^bytes return hint names eve.host's bytes where it is called (clojerl resolves it there)
   (:refer-clojure :exclude [bytes])
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [eve.host :refer [bytes]]
             [clojure.string :as str]
             [eve.keyring :as kr]
@@ -22,11 +22,12 @@
             [eve.region :as region]
             [eve.mem :as mem]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.sorted :as s]
             [eve.deftype-proto.data :as d]
             ;; the collection writers a host map is written through
             [eve.map] [eve.set] [eve.vec] [eve.list]
-            #?@(:cljs [["fs" :as fs] ["os" :as os]])))
+            #?@(:cljs [["fs" :as fs]])))
 
 (defn- hex [v] (apply str (map #(let [x (bit-and % 0xFF)] (str (nth "0123456789abcdef" (quot x 16)) (nth "0123456789abcdef" (mod x 16)))) v)))
 
@@ -87,10 +88,14 @@
       (is (= {:head 2 :size 3 :active 1 :draining 0 :shredded 2 :free 0} (kr/eek-summary r))
           "the last reader of a draining key shreds it"))))
 
+(def ^:private scratch-bases (atom []))
+
 (defn- fresh-base []
-  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :jank "/tmp" :cljr (System.IO.Path/GetTempPath)
-          :default (System/getProperty "java.io.tmpdir"))
-       "/eve-keyring-" (rand-int 1000000000) "/d"))
+  (let [b (scratch/unique-base "keyring")]
+    (swap! scratch-bases conj b)
+    b))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [b @scratch-bases] (scratch/delete-base! b))))))
 
 (defn- file-text
   "the file's bytes as one char per byte (Latin-1), or \"\" when it is missing"

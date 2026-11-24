@@ -9,6 +9,7 @@
    tree — the accounting void behind the DS11 fs11b corruption."
   (:refer-clojure :exclude [swap!])
   (:require [clojure.test :refer [deftest is]]
+            [eve.test-scratch :as scratch]
             [eve.host :refer [swap!]]
             [eve.atom :as a]
             [eve.slab-io :as slab]
@@ -16,8 +17,7 @@
             [ds11-fixture.box :as box]))
 
 (deftest user-namespace-root-publishes-directly
-  (let [base (str (System/getProperty "java.io.tmpdir")
-                  "/eve-user-ns-root-" (System/nanoTime))
+  (let [base (scratch/unique-base "user-ns-root")
         d (a/persistent-atom-domain base :journal? false)
         x (a/lookup-or-create-mmap-atom! d "t/box" nil)]
     (swap! x (fn [_] (box/->Box 1 {:a 1 :b 2})))
@@ -40,4 +40,5 @@
           x2 (a/lookup-or-create-mmap-atom! d2 "t/box" nil)]
       (is (= 51 (box/box-version @x2)))
       (is (= 52 (count (box/box-items @x2))))
-      (a/close-atom-domain! d2))))
+      (a/close-atom-domain! d2))
+    (scratch/delete-base! base)))

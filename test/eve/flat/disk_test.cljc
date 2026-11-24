@@ -10,6 +10,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             #?(:clj [clojure.set :as cset])
             #?(:clj [eve.atom :as ea])
+            #?(:clj [eve.test-scratch :as scratch])
             #?(:clj [eve.deftype-proto.alloc :as alloc])
             #?(:clj [eve.deftype-proto.data :as d])
             #?(:clj [eve.mem :as mem])
@@ -18,8 +19,6 @@
             #?(:clj [eve.flat.image :as image])
             #?(:clj [eve.flat.place :as place]))
   #?(:clj (:import [java.io File]
-                   [java.nio.file Files]
-                   [java.nio.file.attribute FileAttribute]
                    [eve.deftype_proto.alloc JvmSlabCtx])))
 
 #?(:clj
@@ -36,8 +35,14 @@
   {0 (* 8192 32) 1 (* 8192 64) 2 (* 8192 128)
    3 (* 2048 256) 4 (* 1024 512) 5 (* 512 1024)})
 
+(def ^:private scratch-dirs (atom []))
+
 (defn- temp-dir []
-  (str (Files/createTempDirectory "eve-h1" (into-array FileAttribute []))))
+  (let [d (scratch/unique-dir "h1")]
+    (swap! scratch-dirs conj d)
+    d))
+
+(clojure.test/use-fixtures :once (fn [f] (try (f) (finally (doseq [d @scratch-dirs] (scratch/delete-tree! d))))))
 
 (defn- class-total [^JvmSlabCtx ctx ci]
   (mem/-load-i32 (aget ^objects (.-regions ctx) ci) d/SLAB_HDR_TOTAL_BLOCKS))

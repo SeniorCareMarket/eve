@@ -9,6 +9,7 @@
    keeps serving reads, and an unbudgeted domain grows as before."
   (:refer-clojure :exclude [swap!])
   (:require [clojure.test :refer [deftest is]]
+            [eve.test-scratch :as scratch]
             [eve.host :refer [swap!]]
             [eve.atom :as a]))
 
@@ -37,16 +38,18 @@
     (is (= 400 (count @x)))))
 
 (deftest mmap-domain-mem-budget-refuses-growth-by-name
-  (let [base (str (System/getProperty "java.io.tmpdir")
-                  "/eve-mem-budget-test-" (System/nanoTime))]
-    (let [d (a/persistent-atom-domain base :mem-budget 1 :journal? false)
-          x (a/lookup-or-create-mmap-atom! d "t/x" {})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #":mem-budget"
-                            (fill! x 400)))
-      (is (map? @x))
-      (a/close-atom-domain! d))
-    (let [d (a/persistent-atom-domain (str base "-ctl") :journal? false)
-          x (a/lookup-or-create-mmap-atom! d "t/x" {})]
-      (fill! x 400)
-      (is (= 400 (count @x)))
-      (a/close-atom-domain! d))))
+  (let [root (scratch/unique-dir "mem-budget-test")
+        base (str root "/d")]
+    (try
+      (let [d (a/persistent-atom-domain base :mem-budget 1 :journal? false)
+            x (a/lookup-or-create-mmap-atom! d "t/x" {})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #":mem-budget"
+                              (fill! x 400)))
+        (is (map? @x))
+        (a/close-atom-domain! d))
+      (let [d (a/persistent-atom-domain (str base "-ctl") :journal? false)
+            x (a/lookup-or-create-mmap-atom! d "t/x" {})]
+        (fill! x 400)
+        (is (= 400 (count @x)))
+        (a/close-atom-domain! d))
+      (finally (scratch/delete-tree! root)))))

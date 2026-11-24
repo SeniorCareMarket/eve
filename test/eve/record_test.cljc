@@ -18,6 +18,7 @@
             [eve.map :as em]
             [eve.retire :as retire]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.vec :as ev]))
 
 (defn- in-a-domain-of-its-own
@@ -124,35 +125,37 @@
 (deftest persistent-record-survives-reopen
   ;; Same pattern as eve.domain-open-test, but the root is a real nominal record,
   ;; created in swap!'s domain. No process-local constructor/cache survives reopen.
-  (let [base (str "/tmp/eve-record-e7-" (rand-int 1000000000) "/d")
-        dom (a/persistent-atom-domain base)
-        root (a/lookup-or-create-mmap-atom! dom "test/record" nil)]
-    (swap! root (fn [_] (e/with-meta (e/assoc (->Point {:items [1 2]} 7) :extra #{3 4}) {:saved true})))
-    (a/close-atom-domain! dom)
-    (let [dom2 (a/persistent-atom-domain base)
-          root2 (a/lookup-or-create-mmap-atom! dom2 "test/record" nil)
-          start (proc/now-ms)
-          p @root2
-          first-value (field p :x)
-          first-read-ms (- (proc/now-ms) start)]
-      (println "RECORD-REOPEN first-deref+lookup-ms" first-read-ms)
-      (is (= {:items [1 2]} first-value))
-      (is (r/record? p))
-      (is (= "eve.record-test/Point" (r/type-key p)))
-      (is (= {:items [1 2]} (field p :x)))
-      ;; Delivery law: deref delivers the flat form, so the field value is a
-      ;; flat handle (eve.flat.chunk/IFlatHandle), not a slab root (IEveRoot).
-      ;; nbb has no flat layer (see the ns form), so there it stays a slab root.
-      #?(:org.babashka/nbb (is (satisfies? d/IEveRoot (field p :extra)))
-         :lpy (is (satisfies? d/IEveRoot (field p :extra)))
-         :default (is (satisfies? chunk/IFlatHandle (field p :extra))))
-      (is (= #{3 4} (d/eve->clj (field p :extra))))
-      (is (true? (e/get (e/meta p) :saved)))
-      (let [started (proc/now-ms)]
-        (swap! root2 e/assoc :y 8)
-        (println "RECORD-REOPEN first-transaction-ms" (- (proc/now-ms) started)))
-      (is (= 8 (field @root2 :y)))
-      (a/close-atom-domain! dom2))))
+  (let [base (scratch/unique-base "record-e7")]
+    (try
+      (let [dom (a/persistent-atom-domain base)
+            root (a/lookup-or-create-mmap-atom! dom "test/record" nil)]
+        (swap! root (fn [_] (e/with-meta (e/assoc (->Point {:items [1 2]} 7) :extra #{3 4}) {:saved true})))
+        (a/close-atom-domain! dom)
+        (let [dom2 (a/persistent-atom-domain base)
+              root2 (a/lookup-or-create-mmap-atom! dom2 "test/record" nil)
+              start (proc/now-ms)
+              p @root2
+              first-value (field p :x)
+              first-read-ms (- (proc/now-ms) start)]
+          (println "RECORD-REOPEN first-deref+lookup-ms" first-read-ms)
+          (is (= {:items [1 2]} first-value))
+          (is (r/record? p))
+          (is (= "eve.record-test/Point" (r/type-key p)))
+          (is (= {:items [1 2]} (field p :x)))
+          ;; Delivery law: deref delivers the flat form, so the field value is a
+          ;; flat handle (eve.flat.chunk/IFlatHandle), not a slab root (IEveRoot).
+          ;; nbb has no flat layer (see the ns form), so there it stays a slab root.
+          #?(:org.babashka/nbb (is (satisfies? d/IEveRoot (field p :extra)))
+             :lpy (is (satisfies? d/IEveRoot (field p :extra)))
+             :default (is (satisfies? chunk/IFlatHandle (field p :extra))))
+          (is (= #{3 4} (d/eve->clj (field p :extra))))
+          (is (true? (e/get (e/meta p) :saved)))
+          (let [started (proc/now-ms)]
+            (swap! root2 e/assoc :y 8)
+            (println "RECORD-REOPEN first-transaction-ms" (- (proc/now-ms) started)))
+          (is (= 8 (field @root2 :y)))
+          (a/close-atom-domain! dom2)))
+      (finally (scratch/delete-base! base)))))
 
 (deftest functions-have-an-actionable-error
   (doseq [f [#(->Point inc nil)

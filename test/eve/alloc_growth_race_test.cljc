@@ -22,6 +22,7 @@
    overflow). grow! now revalidates the header free-count at current
    geometry before it may lead a doubling."
   (:require [clojure.test :refer [deftest is testing]]
+            [eve.test-scratch :as scratch]
             [eve.atom :as atom]
             [eve.deftype-proto.data :as d]
             [eve.mem :as mem]
@@ -41,12 +42,11 @@
 
 (deftest concurrent-growth-stays-bounded
   (testing "an alloc storm over tiny classes: no failures, no runaway geometry"
-    (let [dir    (.getPath (java.io.File. (System/getProperty "java.io.tmpdir")
-                                          (str "alloc-growth-race-test-" (System/nanoTime))))
+    (let [dir    (scratch/unique-dir "alloc-growth-race-test")
           domain (atom/persistent-atom-domain
-                   dir
-                   :capacities {0 2048 1 4096 2 8192 3 16384 4 32768 5 65536}
-                   :journal? false)
+                  dir
+                  :capacities {0 2048 1 4096 2 8192 3 16384 4 32768 5 65536}
+                  :journal? false)
           a      (atom/lookup-or-create-mmap-atom! domain "storm/anchor" nil)
           sio    (atom/atom-sio a)
           ctx    (slab/domain-ctx sio)
@@ -59,14 +59,14 @@
           counts   (clojure.core/atom (vec (repeat 6 0)))
           workers  (mapv (fn [k]
                            (Thread.
-                             (fn []
-                               (let [rnd (java.util.Random. (+ 7 k))]
-                                 (dotimes [_ per]
-                                   (let [s (nth sizes (.nextInt rnd (count sizes)))]
-                                     (try
-                                       (slab/alloc! sio s)
-                                       (swap! counts update (class-of s) inc)
-                                       (catch Throwable th (swap! failures conj th)))))))))
+                            (fn []
+                              (let [rnd (java.util.Random. (+ 7 k))]
+                                (dotimes [_ per]
+                                  (let [s (nth sizes (.nextInt rnd (count sizes)))]
+                                    (try
+                                      (slab/alloc! sio s)
+                                      (swap! counts update (class-of s) inc)
+                                      (catch Throwable th (swap! failures conj th)))))))))
                          (range threads))]
       (doseq [w workers] (.start w))
       (doseq [w workers] (.join w))
@@ -78,4 +78,6 @@
               bound (* 4 (loop [p 64] (if (>= p (max 64 need)) p (recur (* 2 p)))))]
           (is (<= total bound)
               (str "class " ci ": total " total " vs bound " bound
-                   " (allocated " need ")")))))))
+                   " (allocated " need ")"))))
+      (atom/close-atom-domain! domain)
+      (scratch/delete-tree! dir))))

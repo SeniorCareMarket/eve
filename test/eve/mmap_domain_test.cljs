@@ -1,11 +1,15 @@
 (ns eve.mmap-domain-test
   "Tests for multi-atom domain API (Phase F).
    Run via: node target/thread-test/all.js mmap-domain"
-  (:require [cljs.test :refer [deftest testing is]]
+  (:require [cljs.test :refer [deftest testing is use-fixtures]]
             [eve.atom :as atom]
+            [eve.test-scratch :as scratch]
             [eve.atom :as sa]))
 
-(def ^:private test-base (str "/tmp/eve-domain-test-" (js/Date.now)))
+(def ^:private root (scratch/unique-dir "domain-test"))
+(def ^:private test-base (str root "/d"))
+
+(use-fixtures :once (scratch/once-dir-fixture root))
 
 ;; --- Direct persistent-atom API tests ---
 

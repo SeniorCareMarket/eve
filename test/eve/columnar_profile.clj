@@ -14,6 +14,7 @@
    [eve.dataset.functional :as func]
    [eve.dataset.argops :as argops]
    [eve.atom :as eve-atom]
+   [eve.test-scratch :as scratch]
    [eve.deftype-proto.alloc :as alloc]
    [eve.deftype-proto.data :as d]))
 
@@ -100,8 +101,7 @@
       ;; ---------------------------------------------------------------
       (println)
       (println "--- Level 3: Slab-backed JvmEveArray via nth (mmap atom path) ---")
-      (let [path (str "/tmp/eve-profile-" (System/currentTimeMillis) "/")
-            _ (.mkdirs (java.io.File. path))
+      (let [path (scratch/unique-dir "profile")
             a (eve-atom/atom {:persistent path}
                              {:col (arr/eve-array :float64 data-vec)})]
         ;; Read back from atom — col is now a slab-backed JvmEveArray
@@ -119,7 +119,8 @@
             (fn [] (func/sum slab-arr))))
 
         ;; Clean up
-        (eve-atom/close! a))
+        (eve-atom/close! a)
+        (scratch/delete-tree! path))
 
       ;; ---------------------------------------------------------------
       ;; LEVEL 4: Stock Clojure vector reduce — the "stock" comparison

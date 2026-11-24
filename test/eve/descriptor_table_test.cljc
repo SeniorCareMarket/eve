@@ -4,16 +4,16 @@
    FLAGS entries sit 4 bytes from their neighbours' in their columns, and a free resets the freed block's count
    and flags before its bit clears. Class 6's lock is bit 0 of LOCK_OWNER, so a flag beside it leaves it
    takeable. An mmap domain carries each bitmap class's columns in .slabN.desc-count / .desc-flags files."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [eve.atom :as a]
             [eve.deftype-proto.alloc :as alloc]
             [eve.deftype-proto.coalesc :as coalesc]
             [eve.deftype-proto.data :as d]
             [eve.mem :as mem]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.region :as region]
-            [eve.slab-io :as slab]
-            #?(:cljs ["os" :as os])))
+            [eve.slab-io :as slab]))
 
 (deftest every-bitmap-block-has-a-descriptor
   (let [sio (alloc/heap-domain-sio! {})]
@@ -54,9 +54,14 @@
       (is (some? (coalesc/try-coalesc-alloc! r 2000)) "the lock is bit 0: a flag beside it leaves it takeable")
       (is (zero? (mem/-load-i32 r flags0)) "the hand-out clears the flags and releases the lock"))))
 
+(def ^:private scratch-bases (atom []))
+
 (defn- fresh-base []
-  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :jank "/tmp" :default (System/getProperty "java.io.tmpdir"))
-       "/eve-descriptor-table-" (rand-int 1000000000) "/d"))
+  (let [b (scratch/unique-base "descriptor-table")]
+    (swap! scratch-bases conj b)
+    b))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [b @scratch-bases] (scratch/delete-base! b))))))
 
 (deftest an-mmap-domain-carries-desc-files
   (let [base (fresh-base)

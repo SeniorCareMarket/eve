@@ -12,18 +12,22 @@
    EVJ1 journal records carried (java.util.zip.CRC32 / zlib), and a jlog record's
    bytes against the golden every host must emit."
   (:refer-clojure :exclude [swap! aget aset alength byte-array unchecked-byte])
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.test :refer [deftest is use-fixtures]]
             [eve.host :refer [swap! aget aset alength byte-array unchecked-byte]]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.atom :as a]
             [eve.crc32 :as crc]
-            [eve.jlog :as jlog]
-            #?(:cljs ["os" :as os])))
+            [eve.jlog :as jlog]))
+
+(def ^:private scratch-bases (atom []))
 
 (defn- fresh-base []
-  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :jank "/tmp" :cljr (System.IO.Path/GetTempPath)
-          :default (System/getProperty "java.io.tmpdir"))
-       "/eve-journal-open-" (rand-int 1000000000) "/d"))
+  (let [b (scratch/unique-base "journal-open")]
+    (swap! scratch-bases conj b)
+    b))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [b @scratch-bases] (scratch/delete-base! b))))))
 
 (deftest journaled-domain-opens-writes-and-reopens
   (let [base (fresh-base)

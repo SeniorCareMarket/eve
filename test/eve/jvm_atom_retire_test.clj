@@ -10,7 +10,8 @@
    surviving block counted once. Each reach checked against the allocation log of writing the value.
    (The 9.31 pair-walk this file timed before the descriptor count landed is gone with eve.retire's plan: the
    protocol's hold prunes at counted blocks by construction, so there is no walk left to time.)"
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.test-scratch :as scratch]
             [eve.alpha]
             [eve.atom]
             [eve.core :as e]
@@ -28,6 +29,18 @@
              ICell
              (-hd [_] head)
              (-tl [_] tail))
+
+;; scratch trees deleted after the ns
+(def ^:private scratch-bases (atom []))
+
+(defn- fresh-scratch
+  ([label] (fresh-scratch label "db"))
+  ([label child]
+   (let [b (scratch/unique-base label child)]
+     (swap! scratch-bases conj b)
+     b)))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [b @scratch-bases] (scratch/delete-base! b))))))
 
 (defn- items [c] (loop [c c out []] (if (nil? c) out (recur (-tl c) (conj out (-hd c))))))
 
@@ -187,7 +200,7 @@
 (deftest a-list-at-an-atom-root-survives-its-blocks-reuse
   ;; the old root block was retired with the new cell's tail pointing at it: once the allocator reused it, the list
   ;; read back as other values' bytes ("EVE bytes truncated")
-  (let [base (str (System/getProperty "java.io.tmpdir") "/eve-retire-cell-" (System/nanoTime) "/db")
+  (let [base (fresh-scratch "retire-cell")
         x (eve.atom/persistent-atom {:id ::cells :persistent base} nil)
         churn (eve.atom/persistent-atom {:id ::churn :persistent base} {:n 0})]
     (dotimes [i 300]
@@ -201,7 +214,7 @@
 
 (deftest an-eve-list-at-an-atom-root-survives-its-blocks-reuse
   ;; eve.list's own walk retired every old cell on a conj: the same breakage, for eve's list
-  (let [base (str (System/getProperty "java.io.tmpdir") "/eve-retire-list-" (System/nanoTime) "/db")
+  (let [base (fresh-scratch "retire-list")
         x (eve.atom/persistent-atom {:id ::list :persistent base} '())
         churn (eve.atom/persistent-atom {:id ::churn :persistent base} {:n 0})]
     (dotimes [i 300]
@@ -217,7 +230,7 @@
   "9.31's forms on a disk domain: (place m) stores what the value holds at :a (or something made from it) at :b,
    then :a is replaced, the domain's released blocks reused by another atom's writes, and :b read back."
   [label a0 place expect-b]
-  (let [base (str (System/getProperty "java.io.tmpdir") "/eve-tally-" (System/nanoTime) "/db")
+  (let [base (fresh-scratch "tally")
         a (eve.atom/persistent-atom {:id (keyword "tally" label) :persistent base} {:a a0 :n 0})
         churn (eve.atom/persistent-atom {:id ::tally-churn :persistent base} {:n 0})]
     (swap! a (fn [m] (e/assoc m :b (place m))))
@@ -245,7 +258,7 @@
                   {:x (vec (range 50))}))
 
 (deftest a-piece-of-one-atom-held-by-another-survives-its-blocks-reuse
-  (let [base (str (System/getProperty "java.io.tmpdir") "/eve-tally-x-" (System/nanoTime) "/db")
+  (let [base (fresh-scratch "tally-x")
         x (eve.atom/persistent-atom {:id ::tally-x :persistent base} {:a {:x (vec (range 50))}})
         y (eve.atom/persistent-atom {:id ::tally-y :persistent base} {})
         churn (eve.atom/persistent-atom {:id ::tally-churn2 :persistent base} {:n 0})]

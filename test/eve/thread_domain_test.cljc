@@ -12,6 +12,7 @@
             [eve.host :refer [swap!]]
             [eve.atom :as ea]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.thread :as t]
             [eve.thread-host :as h]
             [eve.thread.cell :as c]
@@ -52,7 +53,7 @@
 
 (defn- fresh-base []
   ;; (the same directory on every host this suite runs on)
-  (str "/tmp/eve-thread-domain-" (rand-int 1000000000) "/d"))
+  (scratch/unique-base "thread-domain"))
 
 (def app-value {:app "eve" :xs [1 2 3] :nested {:k #{:a :b} :n 42}})
 
@@ -68,7 +69,9 @@
   (is (= app-value @a)))
 
 (defn- close! [dom-of-a]
-  (ea/close-atom-domain! (ea/persistent-atom-domain (:base-path (ea/-domain-state dom-of-a)))))
+  (let [base (:base-path (ea/-domain-state dom-of-a))]
+    (ea/close-atom-domain! (ea/persistent-atom-domain base))
+    (scratch/delete-base! base)))
 
 (defn- until [ms f]
   (let [deadline (+ (proc/now-ms) ms)]

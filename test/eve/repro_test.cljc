@@ -9,7 +9,8 @@
    [eve.atom :as e]
    #?(:cljs [eve.deftype-proto.alloc :as alloc])
    #?(:cljs [eve.process-slab :as ps])
-   #?(:clj [clojure.java.io :as io])))
+   #?(:clj [clojure.java.io :as io])
+   [eve.test-scratch :as scratch]))
 
 (def domain-extensions
   [".slab0" ".slab1" ".slab2" ".slab3" ".slab4" ".slab5" ".root" ".rmap"])
@@ -99,11 +100,13 @@
 
 (defn run-repro! []
   (println "=== EveArray cnt corruption repro (v4) ===")
-  (let [path "/tmp/eve-repro-ds"]
+  (let [path (scratch/fixed-file "eve-repro-ds")]
     ;; Test at increasing scales
     (test-dataset-pipeline! 100 path)
     (test-dataset-pipeline! 500 path)
     (test-dataset-pipeline! 1000 path)
     (test-dataset-pipeline! 5000 path)
     (test-dataset-pipeline! 10000 path)
-    (println "\n=== Repro complete ===")))
+    (println "\n=== Repro complete ===")
+    (cleanup! path)
+    (scratch/delete-base! path)))

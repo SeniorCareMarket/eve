@@ -19,6 +19,7 @@
    original's ea/atom-domain, and a persistent mmap domain), past the
    original's 6,000-install bar, with the exact final value checked."
   (:require [clojure.test :refer [deftest is]]
+            [eve.test-scratch :as scratch]
             [eve.atom :as ea]))
 
 (defn- install-loop!
@@ -56,12 +57,12 @@
     (is (= (expected-cell N) v) "the cell holds exactly the 6,000th install")))
 
 (deftest map-fix-history-vector-installs-persistent-domain
-  (let [base (str (System/getProperty "java.io.tmpdir")
-                  "/eve-atom-repro-" (rand-int 1000000000) "/d")
+  (let [base (scratch/unique-base "atom-repro")
         domain (ea/persistent-atom-domain base)
         cell (ea/lookup-or-create-mmap-atom!
               domain "atom-repro/cell" {:value 0 :point 0 :version 0 :history []})
         [outcome v :as r] (install-loop! cell N)]
     (is (= :reached-cap outcome) (str "the install loop must not throw: " (pr-str r)))
     (is (= (expected-cell N) v) "the cell holds exactly the 6,000th install")
-    (ea/close-atom-domain! domain)))
+    (ea/close-atom-domain! domain)
+    (scratch/delete-base! base)))

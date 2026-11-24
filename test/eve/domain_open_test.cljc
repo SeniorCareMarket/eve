@@ -6,21 +6,24 @@
    creator zeroed ROOT_INFLIGHT under the first). The race needs processes (spike/eve-thread/run/joinrace.sh); this
    pins the primitive and a join through the root's magic, which the creator now writes last."
   (:refer-clojure :exclude [swap!])
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [eve.host :refer [swap!]]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.atom :as a]
             [eve.mem :as mem]
             [eve.region :as region]
             [eve.deftype-proto.alloc :as alloc]
-            [eve.deftype-proto.data :as d]
-            #?(:cljs ["os" :as os]))
-  #?(:lpy (:import os)))
+            [eve.deftype-proto.data :as d]))
+
+(def ^:private scratch-bases (atom []))
 
 (defn- fresh-base []
-  (str #?(:cljs (.tmpdir os) :lpy "/tmp" :clje "/tmp" :jank "/tmp" :cljr (System.IO.Path/GetTempPath)
-          :default (System/getProperty "java.io.tmpdir"))
-       "/eve-domain-open-" (rand-int 1000000000) "/d"))
+  (let [b (scratch/unique-base "domain-open")]
+    (swap! scratch-bases conj b)
+    b))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [b @scratch-bases] (scratch/delete-base! b))))))
 
 (deftest one-process-creates-the-file
   (let [f (str (fresh-base) ".x")]
@@ -157,4 +160,4 @@
       (let [r (region/open-mmap-region p n)]
         (is (nil? (#'alloc/force-grown! r)) (str "a " n "-byte region"))
         (is (= n (mem/-byte-length r)))))
-    #?(:clj (.delete (java.io.File. ^String p)) :cljs (.unlinkSync (js/require "fs") p) :lpy (os/remove p) :default nil)))
+    (scratch/delete-base! p)))

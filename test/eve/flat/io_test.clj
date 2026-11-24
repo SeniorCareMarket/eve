@@ -7,6 +7,7 @@
    there is no unchecked read in this namespace's tests either."
   (:require [clojure.edn :as edn]
             [clojure.test :refer [deftest is testing]]
+            [eve.test-scratch :as scratch]
             [eve.flat.chunk :as chunk]
             [eve.flat.io :as io])
   (:import [java.io ByteArrayInputStream ByteArrayOutputStream File]
@@ -132,8 +133,8 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest file-roundtrip
-  (let [f (File/createTempFile "eve-flat-io" ".evs")
-        path (.getAbsolutePath f)
+  (let [path (scratch/unique-file "flat-io" ".evs")
+        f (File. path)
         values [42 {:a 1 :b [1 2 3]} (->Widget "file-widget" 5) "tail"]]
     (try
       (with-open [w (io/file-writer f)]
@@ -154,9 +155,9 @@
                           "  (prn (mapv eve.flat.chunk/unpack vs))"
                           "  (.close r))")
               pb (ProcessBuilder.
-                   (into-array String
-                               ["java" "-cp" (System/getProperty "java.class.path")
-                                "clojure.main" "-e" script]))
+                  (into-array String
+                              ["java" "-cp" (System/getProperty "java.class.path")
+                               "clojure.main" "-e" script]))
               _ (.redirectErrorStream pb true)
               p (.start pb)
               out (String. (.readAllBytes (.getInputStream p)) "UTF-8")
@@ -167,4 +168,4 @@
             (is (= [42 {:a 1 :b [1 2 3]} {:name "file-widget" :size 5} "tail"]
                    (edn/read-string (last (filter seq (clojure.string/split-lines out)))))
                 "the other process unpacked the same values, the record by its fields"))))
-      (finally (.delete f)))))
+      (finally (scratch/delete-base! path)))))

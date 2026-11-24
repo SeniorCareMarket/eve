@@ -10,7 +10,8 @@
    The eve.db.ds case behind it: DB -> BTSet (an IPersistentSet with a
    comparator field) -> Datom."
   (:refer-clojure :exclude [swap!])
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.test-scratch :as scratch]
             [eve.host :refer [swap!]]
             [eve.atom :as a]
             [eve.deftype :as edt]
@@ -38,11 +39,15 @@
 
 (def ^:private set-key "eve.flat.own-type-delivery-test/OneSet")
 
+(def ^:private scratch-bases (atom []))
+
 (defn- fresh-atom []
-  (let [base (str (System/getProperty "java.io.tmpdir")
-                  "/eve-own-type-" (System/nanoTime))
+  (let [base (scratch/unique-base "own-type")
         d (a/persistent-atom-domain base :journal? false)]
+    (swap! scratch-bases conj base)
     [d (a/lookup-or-create-mmap-atom! d "t/own" nil)]))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [b @scratch-bases] (scratch/delete-base! b))))))
 
 (deftest registry-names-the-types
   (is (= OneSet (:host-type (reg/lookup-type set-key))))

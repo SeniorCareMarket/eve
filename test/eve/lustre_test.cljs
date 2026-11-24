@@ -2,15 +2,22 @@
   "Unit tests for LustreMmapRegion (fcntl byte-range locking for cross-node atomics).
    Requires native addon at build/Release/mmap_cas.node (npm run build:addon).
    Tests run on local ext4 — fcntl works locally too, just faster than on Lustre."
-  (:require [cljs.test :refer [deftest testing is]]
+  (:require [cljs.test :refer [deftest testing is use-fixtures]]
             [eve.region :as region]
             [eve.mem :as mem]
-            [eve.atom :as atom]))
+            [eve.atom :as atom]
+            [eve.test-scratch :as scratch]))
 
 (def ^:private fs (js/require "fs"))
 
+(def ^:private scratch-paths (atom []))
+
 (defn- tmp-path [label]
-  (str "/tmp/eve-lustre-" label "-" (js/Date.now) ".mem"))
+  (let [p (scratch/unique-file (str "lustre-" label) ".mem")]
+    (swap! scratch-paths conj p)
+    p))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [p @scratch-paths] (scratch/delete-base! p))))))
 
 (defn- cleanup! [& paths]
   (doseq [p paths]
@@ -152,7 +159,9 @@
 
 (deftest test-lustre-persistent-atom
   (testing "persistent atom with :lustre? true creates and operates correctly"
-    (let [base-path (str "/tmp/eve-lustre-domain-" (js/Date.now))]
+    (let [base-path (let [p (scratch/unique-base "lustre-domain")]
+                      (swap! scratch-paths conj p)
+                      p)]
       (try
         (let [domain (atom/persistent-atom-domain base-path :lustre? true)
               a      (atom/lookup-or-create-mmap-atom! domain "test/counter" {:count 0})]

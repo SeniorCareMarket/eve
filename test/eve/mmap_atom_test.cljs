@@ -2,11 +2,15 @@
   "Tests for the B2 mmap-backed persistent atom (CLJS Node.js only).
    Requires: native addon loaded, mmap slab path working (Phase 2 + 3).
    Run via: node target/thread-test/all.js mmap-atom"
-  (:require [cljs.test :refer [deftest testing is]]
+  (:require [cljs.test :refer [deftest testing is use-fixtures]]
             [eve.atom :as atom]
+            [eve.test-scratch :as scratch]
             [eve.atom :as sa]))
 
-(def ^:private test-base (str "/tmp/eve-p5-atom-test-" (js/Date.now)))
+(def ^:private root (scratch/unique-dir "p5-atom-test"))
+(def ^:private test-base (str root "/d"))
+
+(use-fixtures :once (scratch/once-dir-fixture root))
 
 ;; --- Direct persistent-atom API tests (unchanged) ---
 

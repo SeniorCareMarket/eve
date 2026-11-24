@@ -10,6 +10,7 @@
             [eve.atom :as ea]
             [eve.host]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.thread :as t]
             [eve.thread-host :as h]
             [eve.thread.domain :as dom]
@@ -57,7 +58,7 @@
 
 (defn- fresh-base []
   ;; (the same directory on every host this suite runs on)
-  (str "/tmp/eve-thread-fold-group-" (rand-int 1000000000) "/d"))
+  (scratch/unique-base "thread-fold-group"))
 
 (def app-value {:app "eve" :xs [1 2 3] :nested {:k #{:a :b} :n 42}})
 
@@ -80,7 +81,9 @@
   (dom/detach! r1)
   (is (= seal0 (ea/seal a)) "the rendezvous atom's seal: as it was before any coordination")
   (is (= app-value @a))
-  (ea/close-atom-domain! (ea/persistent-atom-domain (:base-path (ea/-domain-state a)))))
+  (let [base (:base-path (ea/-domain-state a))]
+    (ea/close-atom-domain! (ea/persistent-atom-domain base))
+    (scratch/delete-base! base)))
 
 (defn- refused [r] (when (false? (first r)) (get-in (second r) [:data :eve.thread/refused])))
 

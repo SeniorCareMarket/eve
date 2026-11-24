@@ -28,6 +28,7 @@
             #?(:clj [eve.keyring :as kr])
             #?(:clj [eve.mem :as mem])
             #?(:clj [eve.process :as proc])
+            #?(:clj [eve.test-scratch :as scratch])
             #?(:clj [eve.retire :as retire])
             #?(:clj [eve.flat :as flat]))
   #?(:clj (:import [java.util Arrays ArrayDeque]
@@ -668,7 +669,7 @@
      (let [needle "PLACED-THROUGH-THE-KEYSTREAM-0123456789"
            v {:secret (str "xx" needle "yy") :n 7}
            img (hand-image v)
-           base (str (System/getProperty "java.io.tmpdir") "/eve-z3-enc-" (rand-int 1000000000) "/d")
+           base (scratch/unique-base "z3-enc")
            [sio _ring] (kr/open-encrypted-domain! base {:create? true})]
        (try
          (is (bytes-contains? ^bytes (:bytes img) (.getBytes needle "UTF-8"))
@@ -684,7 +685,8 @@
                                        (.getBytes needle "UTF-8")))
                  (str "the needle is in no slab file: " p))))
          (finally
-           (try (alloc/release-domain-sio! sio true) (catch Throwable _ nil)))))))
+           (try (alloc/release-domain-sio! sio true) (catch Throwable _ nil))
+           (scratch/delete-base! base))))))
 
 ;; ===========================================================================
 ;; Z3.7 — a 1 MiB-unit image places unit by unit; pointers that leave a unit

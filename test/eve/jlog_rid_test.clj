@@ -4,6 +4,7 @@
    carry ids (eve.atom/*request-id*) answers each client's highest applied seq (applied-request-seq) — after the
    domain is closed (its checkpoint's anchor) and reopened."
   (:require [clojure.test :refer [deftest is testing]]
+            [eve.test-scratch :as scratch]
             [eve.atom :as a]
             [eve.jlog :as jlog])
   (:import [java.io File]))
@@ -39,7 +40,7 @@
                                 {:kind jlog/K_COMMIT :body (jlog/encode-commit-body delta nil nil [77 7])}])))))))
 
 (deftest a-domain-answers-applied-requests
-  (let [dir (File. (str (System/getProperty "java.io.tmpdir") "/eve-jlog-rid-" (rand-int 1000000000)))
+  (let [dir (File. (scratch/unique-dir "jlog-rid"))
         base (str dir "/d")]
     (try
       (let [d (a/persistent-atom-domain base)

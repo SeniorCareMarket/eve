@@ -5,6 +5,7 @@
    eve.flat.transfer/transfer!. Requirement ids T1.1–T1.6, registered in
    test/eve/flat/requirements.edn."
   (:require [clojure.test :refer [deftest is testing]]
+            [eve.test-scratch :as scratch]
             [eve.alpha :as e]
             [eve.atom :as ea]
             [eve.mem :as mem]
@@ -251,7 +252,7 @@
            :nested {:a [1 2 3] :b #{:x :y} :c (list 4 5)}}
         a (e/atom v)
         bs (st/detach a)
-        dir (Files/createTempDirectory "eve-t1-xproc" (into-array java.nio.file.attribute.FileAttribute []))
+        dir (.toPath (java.io.File. (scratch/unique-dir "t1-xproc")))
         bytes-file (.resolve dir "value.evs")
         script-file (.resolve dir "receive.clj")
         out-file (.resolve dir "out.edn")]
@@ -272,7 +273,8 @@
       (when finished
         (is (zero? (.exitValue proc))
             (str "receiver failed: " (slurp (.getErrorStream proc))))
-        (is (= v (read-string (slurp (.toFile out-file)))))))))
+        (is (= v (read-string (slurp (.toFile out-file)))))))
+    (scratch/delete-tree! (str dir))))
 
 ;; ---------------------------------------------------------------------------
 ;; T1.5 — a value holding a process-local reference is refused by name

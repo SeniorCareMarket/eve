@@ -1,9 +1,13 @@
 (ns eve.jvm-atom-test
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.test-scratch :as scratch]
             [eve.atom :as atom]
             [eve.vec :as eve-vec]))
 
-(def ^:private base (str "/tmp/eve-p7-jvm-atom-" (System/currentTimeMillis)))
+(def ^:private root (scratch/unique-dir "p7-jvm-atom"))
+(def ^:private base (str root "/d"))
+
+(use-fixtures :once (scratch/once-dir-fixture root))
 
 ;; =========================================================================
 ;; Persistent (mmap-backed) atom tests — via persistent-atom

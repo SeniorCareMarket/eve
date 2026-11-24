@@ -13,16 +13,23 @@
    commit in the prefix the wounded log holds (the anchor's and the consecutive
    valid records after it), rebuilt from the redo where the slabs lost it; the
    domain must commit on."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [eve.atom :as a]
             [eve.jlog :as jlog]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.deftype-proto.data :as d])
   (:import [java.io File RandomAccessFile]
            [java.nio.file Files StandardCopyOption CopyOption]))
 
+(def ^:private scratch-bases (atom []))
+
 (defn- fresh-base []
-  (str (System/getProperty "java.io.tmpdir") "/eve-jlog-fuzz-" (rand-int 1000000000) "/d"))
+  (let [b (scratch/unique-base "jlog-fuzz")]
+    (swap! scratch-bases conj b)
+    b))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [b @scratch-bases] (scratch/delete-base! b))))))
 
 (defn- read-range [path off n]
   (let [raf (RandomAccessFile. (File. ^String path) "r")

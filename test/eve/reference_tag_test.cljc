@@ -16,7 +16,8 @@
             ;; the collection writers a host map or vector is written through
             [eve.map] [eve.set] [eve.vec] [eve.list]
             [eve.net.codec :as wire]
-            [eve.process :as proc]))
+            [eve.process :as proc]
+            #?@(:cljs [] :default [[eve.test-scratch :as scratch]])))
 
 (defn- sio [] (alloc/heap-domain-sio! {}))
 
@@ -81,10 +82,7 @@
 #?(:cljs nil
    :default
    (deftest an-mmap-domain-refuses-a-reference
-     (let [dir (str #?(:bb (System/getProperty "java.io.tmpdir")
-                       :clj (System/getProperty "java.io.tmpdir")
-                       :default "/tmp")
-                    "/eve-reftag-" (rand-int 1000000000))
+     (let [dir (scratch/unique-dir "reftag")
            _ (proc/ensure-parent-dir! (str dir "/d"))
            s (alloc/mmap-domain-sio! (str dir "/d") {:create? true})
            f (closure 3)]
@@ -96,7 +94,8 @@
          (is (thrown? #?(:cljs js/Error :jank nil :default Exception) (codec/encode-value s [{:a [f]}])) "deep in a vector"))
        (testing "and the same domain takes the values eve has bytes for"
          (is (= "plain" (codec/decode s (codec/encode-value s "plain"))))
-         (is (= 2 (e/count (codec/decode s (codec/encode-value s {:a 1 :b [1 2]})))))))))
+         (is (= 2 (e/count (codec/decode s (codec/encode-value s {:a 1 :b [1 2]}))))))
+       (scratch/delete-tree! dir))))
 
 ;; Java object arrays are not Eve typed arrays. Query tuples and transaction
 ;; inputs may contain them; do not route them to the primitive-array writer.

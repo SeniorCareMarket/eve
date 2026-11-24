@@ -9,13 +9,14 @@
    reach this heap's broker): :threads false, its waits run the work."
   (:refer-clojure :exclude [swap!])
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is testing use-fixtures]]
             [eve.host :refer [swap!]]
             [eve.atom :as ea]
             [eve.net.store :as es]
             [eve.net.gateway :as gw]
             [eve.net.stand-in :as si]
             [eve.process :as proc]
+            [eve.test-scratch :as scratch]
             [eve.thread :as t]
             [eve.thread-host :as h]
             [eve.thread.domain :as dom]
@@ -49,6 +50,15 @@
 
 (def app-value {:app "eve" :xs [1 2 3] :nested {:k #{:a :b} :n 42}})
 
+(def ^:private disk-root (scratch/unique-dir "et3"))
+(def ^:private window-root (scratch/window-dir "et3"))
+
+(use-fixtures :once (fn [f]
+                      (try (f)
+                           (finally
+                             (scratch/delete-tree! disk-root)
+                             (scratch/delete-tree! window-root)))))
+
 (defn- fresh [] (str "et3-" (rand-int 1000000000)))
 
 (defn- until [ms f]
@@ -63,7 +73,7 @@
 
 (deftest a-domain-is-placed-in-the-window-by-configuration-only
   (let [nm (fresh)
-        roots {:disk-root (str "/tmp/eve-et3/" nm) :window-root (str "/dev/shm/eve-et3/" nm)}]
+        roots {:disk-root (str disk-root "/" nm) :window-root (str window-root "/" nm)}]
     ;; (a ClojureScript process holds one mmap domain at a time: each placement in turn, closed before the next)
     (doseq [placement [:disk :window]]
       (testing (str "placement " placement ": the same program, one key of a map apart")
@@ -88,7 +98,7 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest doorbells-ring-and-a-futex-wait-wakes
-  (let [path (rung/place {:name (fresh) :placement :window :window-root "/dev/shm/eve-et3"})
+  (let [path (rung/place {:name (fresh) :placement :window :window-root window-root})
         r (rung/open-atom path "app/state" app-value)
         w (rung/descriptor-word "d42")
         b0 (rung/bell-value r w)]
@@ -116,7 +126,7 @@
     (close-path! path)))
 
 (deftest the-drivers-collect-the-same-results
-  (let [path (rung/place {:name (fresh) :placement :window :window-root "/dev/shm/eve-et3"})
+  (let [path (rung/place {:name (fresh) :placement :window :window-root window-root})
         r (rung/open-atom path "app/state" app-value)
         dh (dom/attach! r (assoc opts :rid "r1"))]
     (try
@@ -189,7 +199,7 @@
     {:g g :store store :platform p :cfg {:endpoint ep :domain-id "d1" :api-key "k"}}))
 
 (deftest a-gateway-serves-the-disk-atom-on-eve-net's-routes
-  (let [path (rung/place {:name (fresh) :placement :window :window-root "/dev/shm/eve-et3"})
+  (let [path (rung/place {:name (fresh) :placement :window :window-root window-root})
         d (ea/persistent-atom-domain path)
         a (ea/lookup-or-create-mmap-atom! d "app/state" app-value)
         counter (ea/lookup-or-create-mmap-atom! d "test/counter" {:n 0})

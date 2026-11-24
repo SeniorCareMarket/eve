@@ -12,16 +12,19 @@
    - Sequential process spawning only. True parallel concurrency is Phase 7+.
    - No JVM process. Cross-process tests are Node.js to Node.js only.
    - Stale slots from crashed processes are not reclaimed (Phase 7+)."
-  (:require [cljs.test :refer [deftest testing is]]
+  (:require [cljs.test :refer [deftest testing is use-fixtures]]
             [eve.atom :as atom]
+            [eve.test-scratch :as scratch]
             [eve.mem :as mem]))
 
 (def ^:private ^js cp (js* "require('child_process')"))
-(def ^:private ts (str "-" (js/Date.now)))
 (def ^:private worker-script
   (.resolve (js/require "path") "target/eve-test/mmap-worker.js"))
 
-(defn- base [tag] (str "/tmp/eve-p6-e2e" ts "-" tag))
+(def ^:private root (scratch/unique-dir "p6-e2e"))
+(defn- base [tag] (str root "/" tag))
+
+(use-fixtures :once (scratch/once-dir-fixture root))
 
 (defn- spawn [action & args]
   (let [^js result (.spawnSync ^js cp "node"

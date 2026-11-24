@@ -4,6 +4,7 @@
 
    Run via: node target/eve-test/all.js lustre-bench"
   (:require [eve.atom :as atom]
+            [eve.test-scratch :as scratch]
             [eve.mem :as mem]))
 
 (def ^:private fs (js/require "fs"))
@@ -83,29 +84,24 @@
   ;; Use conservative sizes: 50k (~3.5MB) and 200k (~14MB) to stay within slab limits,
   ;; then scale up if they work.
 
-  (let [ts       (js/Date.now)
-        results  []
+  (let [results  []
         ;; Small warmup
         _        (println "\n=== Lustre Swap! Benchmark ===")
         _        (println (str "Timestamp: " (.toISOString (js/Date.))))
 
         ;; --- 10MB scale ---
         ;; ~150k entries ≈ 10.5MB serialized
-        r1 (run-bench! "mmap-std-10MB"
-                       (str "/tmp/eve-bench-std10-" ts)
-                       false 150000 20)
-        r2 (run-bench! "mmap-lustre-10MB"
-                       (str "/tmp/eve-bench-lus10-" ts)
-                       true 150000 20)
+        p1 (scratch/unique-base "bench-std10")
+        r1 (run-bench! "mmap-std-10MB" p1 false 150000 20)
+        p2 (scratch/unique-base "bench-lus10")
+        r2 (run-bench! "mmap-lustre-10MB" p2 true 150000 20)
 
         ;; --- 100MB scale ---
         ;; ~1.4M entries ≈ 98MB serialized
-        r3 (run-bench! "mmap-std-100MB"
-                       (str "/tmp/eve-bench-std100-" ts)
-                       false 1400000 10)
-        r4 (run-bench! "mmap-lustre-100MB"
-                       (str "/tmp/eve-bench-lus100-" ts)
-                       true 1400000 10)]
+        p3 (scratch/unique-base "bench-std100")
+        r3 (run-bench! "mmap-std-100MB" p3 false 1400000 10)
+        p4 (scratch/unique-base "bench-lus100")
+        r4 (run-bench! "mmap-lustre-100MB" p4 true 1400000 10)]
 
     (println "\n=== Summary ===")
     (doseq [r [r1 r2 r3 r4]]
@@ -123,4 +119,5 @@
       (println (str "  100MB: lustre/std = "
                     (.toFixed (/ (:avg-swap-ms r4) (:avg-swap-ms r3)) 2) "x")))
 
-    (println "\nDone.")))
+    (println "\nDone.")
+    (doseq [b [p1 p2 p3 p4]] (scratch/delete-base! b))))

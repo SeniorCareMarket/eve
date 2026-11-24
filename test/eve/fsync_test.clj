@@ -3,15 +3,21 @@
    a file is trusted (written back by sync_file_range, made durable by another file's fdatasync) only when it is
    hole-free on ext4/xfs and its inode and size are those this process last fdatasync'd hole-free; any other file gets
    its own fdatasync. And a new domain's whole-domain force, once its files are trusted, is one flush."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing use-fixtures]]
+            [eve.test-scratch :as scratch]
             [eve.atom :as a]
             [eve.fsync :as fsync])
   (:import [java.io File RandomAccessFile]))
 
+(def ^:private scratch-dirs (atom []))
+
 (defn- tmp-dir []
-  (let [d (File. (str (System/getProperty "java.io.tmpdir") "/eve-fsync-" (rand-int 1000000000)))]
+  (let [d (File. (scratch/unique-dir "fsync"))]
     (.mkdirs d)
+    (swap! scratch-dirs conj d)
     d))
+
+(use-fixtures :once (fn [f] (try (f) (finally (doseq [d @scratch-dirs] (scratch/delete-tree! (.getPath ^File d)))))))
 
 (defn- write-file! [^File f n]
   (let [raf (RandomAccessFile. f "rw")]

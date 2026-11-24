@@ -13,14 +13,15 @@
   (:refer-clojure :exclude [atom])
   (:require
    [eve.host :refer [field]]
-            [eve.array :as arr]
+   [eve.array :as arr]
    [eve.core :as ec]
    [eve.dataset :as ds]
    [eve.dataset.functional :as func]
    [eve.dataset.argops :as argops]
    [eve.tensor :as tensor]
    [eve.atom :as e]
-   #?(:clj [clojure.java.io :as io])))
+   #?(:clj [clojure.java.io :as io])
+   [eve.test-scratch :as scratch]))
 
 ;;=============================================================================
 ;; Platform + timing infrastructure
@@ -74,7 +75,7 @@
   "Generate a unique temp path for a persistent atom."
   [label]
   (let [n (clojure.core/swap! bench-counter inc)]
-    (str "/tmp/eve-bench-" label "-" n)))
+    (scratch/unique-base (str "bench-" label "-" n))))
 
 (def ^:private domain-extensions
   "File extensions created by a persistent atom domain."
@@ -83,6 +84,7 @@
 (defn- cleanup-persistent-files!
   "Remove all domain files for a given base-path."
   [base-path]
+  (scratch/delete-base! base-path)
   #?(:cljs (let [fs (js/require "fs")]
              (doseq [ext domain-extensions]
                (let [p (str base-path ext)]

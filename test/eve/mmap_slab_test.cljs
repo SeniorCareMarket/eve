@@ -4,13 +4,14 @@
    NO namespace-level side effects — init-mmap-slab! is called in run-mmap-slab!
    (runner), not here, to avoid clobbering the class-5 instance for other tests."
   (:require [cljs.test :refer [deftest testing is]]
+            [eve.test-scratch :as scratch]
             [eve.mem :as mem]
             [eve.deftype-proto.wasm :as wasm]
             [eve.deftype-proto.data :as d]
             [eve.deftype-proto.alloc :as alloc]
             [eve.process-slab :as ps]))
 
-(def ^:private test-path "/tmp/eve-p3-cls5.mem")
+(def ^:private test-path (scratch/fixed-file "eve-p3-cls5.mem"))
 
 ;;=============================================================================
 ;; Step 3.3: register-mmap-slab-instance!

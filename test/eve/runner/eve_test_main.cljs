@@ -10,6 +10,7 @@
    [clojure.string :as str]
    [eve.deftype-proto.alloc :as eve-alloc]
    [eve.process-slab :as ps]
+   [eve.test-scratch :as scratch]
    [eve.atom :as a]
    [eve.data :as d]
 
@@ -235,8 +236,10 @@
 
 (defn- run-mmap-slab! []
   (load-native-addon!)
-  (ps/init-mmap-slab! 5 "/tmp/eve-p3-cls5.mem")
-  (t/run-tests 'eve.mmap-slab-test))
+  (let [p (scratch/fixed-file "eve-p3-cls5.mem")]
+    (ps/init-mmap-slab! 5 p)
+    (t/run-tests 'eve.mmap-slab-test)
+    (scratch/delete-base! p)))
 
 (defn- run-mmap-atom! []
   (load-native-addon!)
