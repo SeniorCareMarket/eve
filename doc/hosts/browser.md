@@ -105,7 +105,8 @@ changed since it last wrote them, through a fixed bounce buffer (a sync handle r
 | recovery | a fresh root (no live worker holds the file) is read from storage; a commit survives a killed browser (the relaunch test: same profile, fixed port, 7 commits then a kill, 7 read back) |
 
 Measured (`EVE_BROWSER_PERF=opfs`, this box, 2026-11-24 ET, nice 19, one run, under gate load): `disk-swap-counter`
-404 µs/op in headless Chrome (4096 ops), durable (journal batch 1), `readwrite-unsafe` handles. Not a `perf-all`
+404 µs/op in headless Chrome 156 (4096 ops, `readwrite-unsafe` handles), 979 µs/op in headless Firefox 159 (1024
+ops, `readwrite` handles), durable (journal batch 1). Not a `perf-all`
 cell: the browser row's `disk-swap-counter` stays n/a there, since that page has no OPFS pool.
 
 ## How eve is built in a browser

@@ -252,7 +252,7 @@ these write shapes, at this pin.
   SAB ring) after a native JS packer recovered most of the pack-rep
   cost.
 - **browser `disk-swap-counter`** — n/a in `perf-all` (its page has no OPFS pool). The opt-in OPFS cell,
-  `EVE_BROWSER_PERF=opfs bb test:browser`, measured 404 µs/op in headless Chrome on 2026-11-24 ET (one run, under
+  `EVE_BROWSER_PERF=opfs bb test:browser`, measured 404 µs/op in headless Chrome and 979 µs/op in headless Firefox on 2026-11-24 ET (one run, under
   gate load; not a perf-all cell, so not in §1). See [hosts/browser.md](hosts/browser.md).
 - **Startup shootout, hosts other than JVM source-form** — not re-run
   at this pin.
