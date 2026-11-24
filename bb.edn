@@ -259,8 +259,17 @@
                        "read" (let [got (na/deref ra)] (prn {:op :read :ok (= want got)}))))}
   test:browser {:doc "The thread feature's conformance in headless Chromium (hosts.edn :browser; scripts/test-browser.clj)"
                 :task (load-file "scripts/test-browser.clj")}
-  test:browser:dom {:doc "eve.dom's conformance in headless Chromium: main a worker driving the page's DOM (scripts/test-browser.clj)"
-                    :task (shell {:extra-env {"EVE_BROWSER_SUITE" "dom"}} "bb" "test:browser")}
+  test:browser:dom {:doc "eve.dom's conformance in headless Chromium, by each transport: main a worker driving the page's DOM (scripts/test-browser.clj)"
+                    :task (do (shell {:extra-env {"EVE_BROWSER_SUITE" "dom" "EVE_BROWSER_EXPECT" "sab"}} "bb" "test:browser")
+                              ;; unisolated: eve-sw.js isolates the page (one reload), then the SAB transport
+                              (shell {:extra-env {"EVE_BROWSER_SUITE" "dom" "EVE_BROWSER_COI" "0" "EVE_BROWSER_EXPECT" "sab"}}
+                                     "bb" "test:browser")
+                              ;; unisolated, and kept so: the service worker's synchronous-XHR relay
+                              (shell {:extra-env {"EVE_BROWSER_SUITE" "dom" "EVE_BROWSER_COI" "0" "EVE_BROWSER_EXPECT" "sw"
+                                                  "EVE_BROWSER_QUERY" "eve-dom-transport=sw"}}
+                                     "bb" "test:browser"))}
+  test:browser:dom-demo {:doc "eve.dom's acceptance demo in headless Chromium: reagami + canvas-confetti in main's worker"
+                         :task (shell {:extra-env {"EVE_BROWSER_SUITE" "dom-demo"}} "bb" "test:browser")}
   test:clje {:doc "The shared (.cljc) tests on clojerl (eve's NIF is built on first load into adapters/core/beam/target/clje/)"
              :task (apply shell "clojerl" (concat (mapcat (fn [r] ["-pa" r]) (roots :clje "test"))
                                                   ["-m" "eve.runner.clje-main" "test"] *command-line-args*))}}}

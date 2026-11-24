@@ -13,12 +13,15 @@
   0)
 
 ;; A 4-byte SAB for Atomics.wait: a sub-ms sleep on the main thread.
-(def ^:private sleep-i32 (js/Int32Array. (js/SharedArrayBuffer. 4)))
+(def ^:private sleep-i32
+  ;; made on first sleep, not at load: a browser page that is not cross-origin isolated has no SharedArrayBuffer,
+  ;; and loading eve there must not fail (eve.dom's service-worker transport runs unisolated)
+  (delay (js/Int32Array. (js/SharedArrayBuffer. 4))))
 
 (defn sleep-ms!
   "Block this thread for about ms milliseconds."
   [ms]
-  (js/Atomics.wait sleep-i32 0 0 ms))
+  (js/Atomics.wait @sleep-i32 0 0 ms))
 
 (defn start-timer!
   "Call f every period-ms until stop-timer!. Returns the host's handle. The timer never keeps the process (or a

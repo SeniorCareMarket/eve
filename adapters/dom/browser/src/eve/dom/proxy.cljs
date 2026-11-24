@@ -28,7 +28,7 @@
        :range_next 0 :range_end 0
        :win nil :doc nil
        :raf #js [] :raf_next 0 :raf_scheduled false
-       :stats #js {:sync 0 :frames 0 :ops 0}})
+       :stats #js {:sync 0 :frames 0 :ops 0 :page_errors 0}})
 
 (defonce ^:private metas (js/WeakMap.))
 (defonce ^:private cb-ids (js/WeakMap.))
@@ -53,7 +53,12 @@
   [x]
   (some-> (meta-of x) .-type))
 
-(defn stats [] (js->clj (.-stats st) :keywordize-keys true))
+(defn stats
+  "Counts so far: :sync (round trips that waited for an answer), :frames, :ops, :page-errors (queued ops that failed
+   on the page, each logged there)."
+  []
+  (let [s (.-stats st)]
+    {:sync (.-sync s) :frames (.-frames s) :ops (.-ops s) :page-errors (.-page-errors s)}))
 
 (defn- refused [why msg data]
   (ex-info (str "eve.dom: " msg) (merge {:eve.dom/refused why} data)))
@@ -89,8 +94,10 @@
       (set! (.-ops s) (+ (.-ops s) (.-qn st))))
     (let [reply (call (c/view w))]
       (clear-q!)
-      (let [r (c/reader reply)]
-        (c/r-u32 r)
+      (let [r (c/reader reply)
+            errors (c/r-u32 r)]
+        (when (pos? errors)
+          (let [s (.-stats st)] (set! (.-page-errors s) (+ (.-page-errors s) errors))))
         r))))
 
 (defn- write-release! [w]
@@ -629,6 +636,16 @@
                 (recur (+ got n)))))
           (js/Atomics.store ctl sw c/S-IDLE)
           out)))))
+
+(defn sw-relayed?
+  "Do this worker's synchronous XHRs reach the service worker? (Firefox sends them to the network.)"
+  []
+  (let [x (js/XMLHttpRequest.)]
+    (try
+      (.open x "GET" "/eve-sw/px/sleep?ms=0" false)
+      (.send x)
+      (= "1" (.getResponseHeader x "X-Eve-Sw"))
+      (catch :default _ false))))
 
 (defn sw-transport
   "The round trip through the service worker (the page not isolated): post the frame to the page, then wait in a

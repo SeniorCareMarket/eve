@@ -14,7 +14,12 @@
 ;;   its lines printed. EVE_BROWSER_OPFS=1: the OPFS disk tier's suites instead (the :eve-opfs-browser build,
 ;;   eve.runner.opfs-browser-main: the page mounts the OPFS pool first). EVE_BROWSER_SUITE=dom (bb test:browser:dom):
 ;;   eve.dom's conformance instead (the :eve-dom-browser build, eve.runner.dom-browser-main: the program's main a
-;;   worker driving the page's DOM).
+;;   worker driving the page's DOM); EVE_BROWSER_SUITE=dom-demo (bb test:browser:dom-demo): its acceptance demo,
+;;   reagami + canvas-confetti.
+;;   EVE_BROWSER=firefox|webkit: that engine instead of Chromium, through Playwright (scripts/browser-open.cjs; NODE_PATH
+;;   to find playwright, PLAYWRIGHT_BROWSERS_PATH for its browsers). For eve.dom's transports: EVE_BROWSER_COI=0 serves
+;;   the page without COOP/COEP (it must isolate itself through eve-sw.js), EVE_BROWSER_QUERY is the page URL's query
+;;   (eve-dom-transport=sw: the service worker's relay), EVE_BROWSER_EXPECT the transport the result must report.
 (require '[babashka.fs :as fs]
          '[babashka.process :as p]
          '[clojure.edn :as edn]
@@ -24,21 +29,32 @@
 (def eve (str (fs/absolutize ".")))
 (def perf? (some? (System/getenv "EVE_BROWSER_PERF")))
 (def opfs? (and (not perf?) (some? (System/getenv "EVE_BROWSER_OPFS"))))
-(def dom? (= "dom" (System/getenv "EVE_BROWSER_SUITE")))
-(def build (cond perf? "eve-perf-browser" opfs? "eve-opfs-browser" dom? "eve-dom-browser" :else "eve-thread-browser"))
-(def out (str eve (cond perf? "/target/perf-browser" opfs? "/target/opfs-browser" dom? "/target/dom-browser"
-                        :else "/target/thread-browser")))
+(def suite (System/getenv "EVE_BROWSER_SUITE"))
+(def dom? (contains? #{"dom" "dom-demo"} suite))
+(def build (cond perf? "eve-perf-browser" opfs? "eve-opfs-browser" (= "dom" suite) "eve-dom-browser"
+                 (= "dom-demo" suite) "eve-dom-demo" :else "eve-thread-browser"))
+(def out (str eve (cond perf? "/target/perf-browser" opfs? "/target/opfs-browser" (= "dom" suite) "/target/dom-browser"
+                        (= "dom-demo" suite) "/target/dom-demo" :else "/target/thread-browser")))
+(def aliases (if (= "dom-demo" suite) "-M:browser-test:dom-demo" "-M:browser-test"))
 (def public (str out "/public"))
 
 (defn- step [& xs] (apply println "test:browser:" xs) (flush))
 
 (fs/create-dirs public)
 (spit (str public "/index.html")
-      "<!doctype html><meta charset=utf-8><title>eve.thread-host conformance</title><script src=\"/js/main.js\"></script>")
+      (if dom?
+        "<!doctype html><meta charset=utf-8><title>eve.dom</title><body><div id=\"app\"></div><script src=\"/js/main.js\"></script></body>"
+        "<!doctype html><meta charset=utf-8><title>eve.thread-host conformance</title><script src=\"/js/main.js\"></script>"))
+(when dom?
+  ;; eve's service worker at the site root: isolation headers for an unisolated page, and eve.dom's relay
+  (fs/copy (str eve "/adapters/sw/browser/eve-sw.js") (str public "/eve-sw.js") {:replace-existing true}))
+(when (= "dom-demo" suite)
+  ;; the demo's third-party scripts (unmodified, licences beside them), loaded by its main worker
+  (fs/copy-tree (str eve "/adapters/dom/browser/demo/public") public {:replace-existing true}))
 
 (step (str "building the page (shadow-cljs release " build ", :simple)"))
 (let [r (p/shell {:dir eve :continue true :out :string :err :string}
-                 "clojure" "-M:browser-test" "-m" "shadow.cljs.devtools.cli" "release" build)]
+                 "clojure" aliases "-m" "shadow.cljs.devtools.cli" "release" build)]
   (when-not (zero? (:exit r))
     (println (:out r) (:err r))
     (step "build FAILED")
@@ -48,8 +64,11 @@
 
 (defn- serve [req]
   (let [uri (:uri req)
-        isolated {"Cross-Origin-Opener-Policy" "same-origin" "Cross-Origin-Embedder-Policy" "require-corp"
-                  "Cross-Origin-Resource-Policy" "same-origin" "Cache-Control" "no-store"}]
+        isolated (if (= "0" (System/getenv "EVE_BROWSER_COI"))
+                   ;; served unisolated: the page must get there itself (eve.dom: through eve-sw.js)
+                   {"Cache-Control" "no-store"}
+                   {"Cross-Origin-Opener-Policy" "same-origin" "Cross-Origin-Embedder-Policy" "require-corp"
+                    "Cross-Origin-Resource-Policy" "same-origin" "Cache-Control" "no-store"})]
     (cond
       (and (= :post (:request-method req)) (= "/result" uri))
       (do (deliver result (slurp (:body req))) {:status 200 :headers isolated :body "ok"})
@@ -90,13 +109,20 @@
 (def stop (http/run-server serve {:ip "127.0.0.1" :port 0 :legacy-return-value? false}))
 (def port (http/server-port stop))
 (def profile (str (fs/create-temp-dir {:prefix "eve-chrome-"})))
-(step (str "serving on 127.0.0.1:" port "; opening headless Chromium"))
-(def chrome (p/process {:out :string :err :string}
-                       (or (find-chrome)
-                           (throw (ex-info "test:browser: no Chromium found — set EVE_CHROME or run: npx playwright install chromium" {})))
-                       "--headless=new" "--no-sandbox" "--disable-gpu" "--no-proxy-server" "--no-first-run"
-                       "--enable-logging=stderr" "--v=0"
-                       (str "--user-data-dir=" profile) (str "http://127.0.0.1:" port "/index.html")))
+(step (str "serving on 127.0.0.1:" port "; opening headless " (or (System/getenv "EVE_BROWSER") "Chromium")))
+(def page-url (str "http://127.0.0.1:" port "/index.html" (some->> (System/getenv "EVE_BROWSER_QUERY") (str "?"))))
+(def engine (System/getenv "EVE_BROWSER"))
+(def chrome
+  (if engine
+    ;; another engine (firefox, webkit) through Playwright (NODE_PATH, PLAYWRIGHT_BROWSERS_PATH as usual)
+    (p/process {:out :string :err :string :dir eve}
+               "node" "scripts/browser-open.cjs" engine page-url)
+    (p/process {:out :string :err :string}
+               (or (find-chrome)
+                   (throw (ex-info "test:browser: no Chromium found — set EVE_CHROME or run: npx playwright install chromium" {})))
+               "--headless=new" "--no-sandbox" "--disable-gpu" "--no-proxy-server" "--no-first-run"
+               "--enable-logging=stderr" "--v=0"
+               (str "--user-data-dir=" profile) page-url)))
 
 (def timeout-s (parse-long (or (System/getenv "EVE_BROWSER_TIMEOUT_S") "300")))
 (def got (deref result (* 1000 timeout-s) nil))
@@ -118,7 +144,10 @@
             (doseq [l (:lines r)] (println (pr-str l)))
             (System/exit 0))
         {:keys [test pass fail error]} (:summary r)
-        main-ok (every? true? (vals (:main r)))]
+        expect (System/getenv "EVE_BROWSER_EXPECT")
+        main-ok (and (every? true? (vals (:main r)))
+                     ;; eve.dom: the transport the run was meant to reach
+                     (or (nil? expect) (= expect (name (:transport r :none)))))]
     (step "result" (pr-str (dissoc r :failures)))
     (doseq [f (:failures r)] (println "  " f))
     (println :summary (assoc (:summary r) :main (:main r)))

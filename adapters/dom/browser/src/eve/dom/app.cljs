@@ -45,7 +45,12 @@
         {:id (.get p "id") :main (.get p "main")}))))
 
 (defn- run-sw-worker! [{:keys [id main]}]
+  (when-not (proxy/sw-relayed?)
+    (.postMessage js/self #js {:eveTag "eve.dom" :op "refused" :why "sw-not-relaying"})
+    (throw (ex-info "eve.dom.app: this browser does not route a worker's synchronous XHR through the service worker"
+                    {:eve.dom/refused :sw-not-relaying})))
   (proxy/attach! (proxy/sw-transport id) (* 4 1024 1024) :sw)
+  (.postMessage js/self #js {:eveTag "eve.dom" :op "ready"})
   (.addEventListener js/self "message"
                      (fn [^js e]
                        (let [d (.-data e)]
@@ -64,7 +69,8 @@
   (let [id 1
         url (str (h/kernel) (if (re-find #"\?" (h/kernel)) "&" "?") "eve-dom=sw&id=" id "&main="
                  (js/encodeURIComponent (str main)))
-        w (js/Worker. url)]
+        w (js/Worker. url)
+        settle (atom nil)]
     (screen/set-sender! id (fn [msg transfer] (if transfer (.postMessage w msg transfer) (.postMessage w msg))))
     (.addEventListener w "message"
                        (fn [^js e]
@@ -72,39 +78,62 @@
                            (when (and d (= "eve.dom" (.-eveTag d)))
                              (case (.-op d)
                                "call" (screen/serve-sw-call! id d)
+                               "ready" (when-let [f @settle] (f nil))
+                               "refused" (when-let [f @settle] (f (keyword (.-why d))))
                                nil)))))
-    {:transport :sw :worker w}))
+    (js/Promise.
+     (fn [resolve reject]
+       (reset! settle (fn [why]
+                        (if why
+                          (reject (ex-info (str "eve.dom.app: no transport: " (name why)) {:eve.dom/refused why}))
+                          (resolve {:transport :sw :worker w}))))))))
 
 (defn- start-isolated! [main]
   (screen/start! {:transport :sab})
   (let [[w] (h/start-threads! 1 'eve.dom.app/main-entry {:main (str main)} {})]
     {:transport :sab :thread w}))
 
+(defn- controlled
+  "A Promise, resolved once a service worker controls this page."
+  []
+  (let [sw js/navigator.serviceWorker]
+    (if (.-controller sw)
+      (js/Promise.resolve true)
+      (js/Promise. (fn [resolve _]
+                     (.addEventListener sw "controllerchange" (fn [_] (resolve true)) #js {:once true}))))))
+
+(defn- page-option [k]
+  (.get (js/URLSearchParams. (.-search js/location)) k))
+
 (defn start!
   "On the page: start main's worker by the best transport the page has; a Promise of {:transport ..}. Options:
-   :main (the symbol of main's fn), :sw (the service worker's URL, default /eve-sw.js), :boot (the OPFS tier's boot
-   fn: called with {:main ..} instead, when given — the pools and mount come before main)."
-  [{:keys [main sw boot] :or {sw "/eve-sw.js"} :as opts}]
-  (cond
-    boot (js/Promise.resolve (boot (assoc opts :start (fn [] (start-isolated! main)))))
-    (isolated?) (js/Promise.resolve (start-isolated! main))
-    (not (exists? js/navigator.serviceWorker))
-    (js/Promise.reject (ex-info "eve.dom.app: not cross-origin isolated, and no service worker here"
-                                {:eve.dom/refused :no-transport}))
-    (and (.-controller js/navigator.serviceWorker) (.getItem js/sessionStorage reload-key))
-    (js/Promise.resolve (start-sw-worker! main))
-    :else
-    (-> (.register js/navigator.serviceWorker (str sw "?coi=1") #js {:scope "/"})
-        (.then (fn [_] (.-ready js/navigator.serviceWorker)))
-        (.then (fn [_]
-                 (if (.getItem js/sessionStorage reload-key)
-                   (if (.-controller js/navigator.serviceWorker)
-                     (start-sw-worker! main)
-                     (throw (ex-info "eve.dom.app: the service worker does not control this page"
-                                     {:eve.dom/refused :no-transport})))
-                   (do (.setItem js/sessionStorage reload-key "1")
-                       (.reload js/location)
-                       (js/Promise. (fn [_ _])))))))))
+   :main (the symbol of main's fn), :sw (the service worker's URL, default /eve-sw.js), :transport (:sw to use the
+   service worker's relay even where the page could be isolated; also the page's ?eve-dom-transport=sw), :coi (false:
+   do not ask the service worker for isolation headers), :boot (the OPFS tier's boot fn: called with these options and
+   :start, a fn that starts main's worker, so the pools and the mount come first)."
+  [{:keys [main sw boot transport coi] :or {sw "/eve-sw.js" coi true} :as opts}]
+  (let [forced (or transport (some-> (page-option "eve-dom-transport") keyword))
+        coi (and coi (not= forced :sw))
+        ;; the kernel's URL now, before a service worker controls the page: Firefox fails the synchronous probe of
+        ;; manifest.edn from a page a service worker has just claimed
+        _ (when-not boot (h/kernel))]
+    (cond
+      boot (js/Promise.resolve (boot (assoc opts :start (fn [] (start-isolated! main)))))
+      (and (isolated?) (not= forced :sw)) (js/Promise.resolve (start-isolated! main))
+      (not (exists? js/navigator.serviceWorker))
+      (js/Promise.reject (ex-info "eve.dom.app: not cross-origin isolated, and no service worker here"
+                                  {:eve.dom/refused :no-transport}))
+      :else
+      (-> (.register js/navigator.serviceWorker (str sw (when coi "?coi=1")) #js {:scope "/"})
+          (.then (fn [_] (.-ready js/navigator.serviceWorker)))
+          (.then (fn [_] (controlled)))
+          (.then (fn [_]
+                   (if (and coi (not (.getItem js/sessionStorage reload-key)))
+                     ;; once: the service worker adds the isolation headers to the next load
+                     (do (.setItem js/sessionStorage reload-key "1")
+                         (.reload js/location)
+                         (js/Promise. (fn [_ _])))
+                     (start-sw-worker! main))))))))
 
 (defn run-app!
   "The program's entry point calls this first. In main's worker: run main (true). In another eve.thread-host thread:

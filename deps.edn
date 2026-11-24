@@ -53,6 +53,11 @@
   :cohost-media-page
   {:extra-paths ["capstone/cohost-media/src" "capstone/cohost-media/page/src"]
    :extra-deps {io.github.borkdude/reagami {:git/tag "v0.0.36" :git/sha "562cf3d"}}}
+  ;; eve.dom's acceptance demo (bb test:browser:dom-demo): reagami and canvas-confetti in the program's main worker,
+  ;; added to :browser-test
+  :dom-demo
+  {:extra-paths ["adapters/dom/browser/demo/src"]
+   :extra-deps {io.github.borkdude/reagami {:git/tag "v0.0.36" :git/sha "562cf3d"}}}
   ;; eve's local network, the page's sources (bb net:local), added to :browser-test
   :net-local-page
   {:extra-paths ["net-local/page/src"]}
