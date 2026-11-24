@@ -146,9 +146,12 @@ cell: the browser row's `disk-swap-counter` stays n/a there, since that page has
 - **No http-server**; headers the browser forbids are dropped; a batch's answers are capped at 8 MB.
 - **Disk domains only in workers, and only after the pool mounts**: `eve.opfs.boot/boot!` mounts the OPFS pool
   before any eve thread starts; a worker spawned before it has no file pool.
-- **WebKit (Playwright's) does not pass the OPFS suite on this box**: `RangeError: Out of memory` creating a
-  SharedArrayBuffer in the suite's reader worker, in both the header-isolated and the service-worker runs, on the
-  tree that passed earlier too (environmental; not fixed). Chrome and Firefox pass.
+- **WebKit needs memory headroom for its SharedArrayBuffers**: Playwright's WebKit 2388 passes every OPFS mode
+  (header- and service-worker-isolated 14/67, the relay pool 3/11, relaunch write and read; 2026-11-24 07:48–07:50 ET).
+  Earlier that morning it failed with `RangeError: Out of memory` creating a SharedArrayBuffer in the suite's reader
+  worker, while the box was out of memory (swap full, 7.8 GB of stale `/dev/shm` scratch). Once that was freed it
+  passed with no code change. WebKit also needs a persistent profile for OPFS (an ephemeral context fails with
+  UnknownError); the runner passes one.
 - **Firefox's synchronous manifest read fails on an unisolated page** (`eve.thread-host`'s kernel lookup): the relay
   page loads the kernel by `<script src>` instead; not fixed in `thread-host`.
 - A page reading a network atom synchronously on its main thread stalls its workers' batches (above).
