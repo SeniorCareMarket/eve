@@ -274,7 +274,7 @@
             :jank (if (re-matches #"[+-]?\d+" (str s))
                     (read-string t)
                     (throw (ex-info (str "not an integer: " s) {})))
-            :cljr (BigInteger. (str t))
+            :cljr (clojure.lang.BigInteger/Parse (str t))
             :default (BigInteger. ^String (str t)))))
      (defn- bi-from [x]
        (cond
@@ -295,6 +295,29 @@
                          (throw (ex-info "ratio has no integer value" {:value x}))
                          (number? x) (BigInteger/valueOf #?(:clje x :default (long x)))
                          :else (BigInteger. (str x)))
+                  :cljr (cond
+                          (instance? clojure.lang.BigInt x)
+                          (.toBigInteger ^clojure.lang.BigInt x)
+                          (instance? clojure.lang.BigInteger x) x
+                          (instance? clojure.lang.BigDecimal x)
+                          ;; inline: bi-from sits above bi* / bi-pow10 in this do,
+                          ;; and ClojureCLR resolves those names at compile time.
+                          (let [e (.Exponent ^clojure.lang.BigDecimal x)
+                                c (.Coefficient ^clojure.lang.BigDecimal x)
+                                pow10 (fn [k]
+                                        (loop [i 0 p (clojure.lang.BigInteger/Parse "1")]
+                                          (if (< i k) (recur (inc i) (*' p 10)) p)))]
+                            (if (>= e 0)
+                              (*' c (pow10 e))
+                              (let [div (pow10 (- e))
+                                    q (quot c div)
+                                    r (rem c div)]
+                                (if (zero? r) q
+                                  (throw (ex-info "Nonintegral decimal has no integer value" {:value x}))))))
+                          (instance? clojure.lang.Ratio x)
+                          (throw (ex-info "ratio has no integer value" {:value x}))
+                          (number? x) (clojure.lang.BigInteger/Parse (str (long x)))
+                          :else (bi-from (str x)))
                   :default (bi-from (str x)))))
      (defn- bi-str [a] (str a))
      (defn- bi-zero? [a] (zero? a))
@@ -303,11 +326,11 @@
      ;; basilisp's unprimed + - * are checked long ops (an exact token
      ;; past a long threw ArithmeticException: integer overflow); its
      ;; primed ops promote, exactly as on :clj.
-     (defn- bi-abs [a] (if (neg? a) #?(:clj (-' a) :lpy (-' a) :jank (-' a) :default (- a)) a))
-     (defn- bi-neg [a] #?(:clj (-' a) :lpy (-' a) :jank (-' a) :default (- a)))
-     (defn- bi+ [a b] #?(:clj (+' a b) :lpy (+' a b) :jank (+' a b) :default (+ a b)))
-     (defn- bi- [a b] #?(:clj (-' a b) :lpy (-' a b) :jank (-' a b) :default (- a b)))
-     (defn- bi* [a b] #?(:clj (*' a b) :lpy (*' a b) :jank (*' a b) :default (* a b)))
+     (defn- bi-abs [a] (if (neg? a) #?(:clj (-' a) :lpy (-' a) :jank (-' a) :cljr (-' a) :default (- a)) a))
+     (defn- bi-neg [a] #?(:clj (-' a) :lpy (-' a) :jank (-' a) :cljr (-' a) :default (- a)))
+     (defn- bi+ [a b] #?(:clj (+' a b) :lpy (+' a b) :jank (+' a b) :cljr (+' a b) :default (+ a b)))
+     (defn- bi- [a b] #?(:clj (-' a b) :lpy (-' a b) :jank (-' a b) :cljr (-' a b) :default (- a b)))
+     (defn- bi* [a b] #?(:clj (*' a b) :lpy (*' a b) :jank (*' a b) :cljr (*' a b) :default (* a b)))
      ;; basilisp's quot/rem are long ops: an unscaled value past a long
      ;; threw ArithmeticException: integer overflow (numeric-tags
      ;; decimals-round-trip). Python's floordiv/mod floor; Clojure's
@@ -340,6 +363,7 @@
        #?(:jank (loop [i 0 p (bi-from 1)] (if (< i k) (recur (inc i) (bi* p (bi-from 10))) p))
           :clj (.pow (BigInteger/TEN) (int k))
           :lpy (python/pow 10 k)
+          :cljr (loop [i 0 p (bi-from 1)] (if (< i k) (recur (inc i) (bi* p (bi-from 10))) p))
           :default (loop [i 0 p 1] (if (< i k) (recur (inc i) (#?(:clj *' :default *) p 10)) p))))
      (defn- bi-limbs32 [n]
        #?(:jank
@@ -422,6 +446,7 @@
 
 (defn- host-ratio? [v]
   #?(:clj (instance? clojure.lang.Ratio v)
+     :cljr (instance? clojure.lang.Ratio v)
      :lpy (instance? fractions/Fraction v)
      ;; jank's (type x) is the completion's type-key string
      :jank (= "ratio" (type v))
@@ -429,12 +454,15 @@
 
 (defn- host-decimal? [v]
   #?(:clj (instance? java.math.BigDecimal v)
+     :cljr (instance? clojure.lang.BigDecimal v)
      :lpy (instance? decimal/Decimal v)
      :default false))
 
 (defn- host-bigint? [v]
   #?(:clj (or (instance? clojure.lang.BigInt v)
               (instance? java.math.BigInteger v))
+     :cljr (or (instance? clojure.lang.BigInt v)
+               (instance? clojure.lang.BigInteger v))
      ;; jank's (type x) is the completion's type-key string
      :jank (= "big_integer" (type v))
      :default false))
@@ -691,6 +719,9 @@
                                (or (.-bipart ^clojure.lang.BigInt x)
                                    (BigInteger/valueOf (.-lpart ^clojure.lang.BigInt x)))
                                x)
+                        :cljr (if (instance? clojure.lang.BigInt x)
+                                (.toBigInteger ^clojure.lang.BigInt x)
+                                x)
                         :default x)
     :else (bi-from x)))
 
@@ -757,6 +788,7 @@
 (defn- wrap-bigint [n]
   #?(:cljs (EveBigInt. (if (bi? n) n (bi-from n)))
      :clj (clojure.core/bigint n)
+     :cljr (clojure.core/bigint n)
      :jank (clojure.core/bigint n)
      :lpy (if (instance? EveBigInt n) n (EveBigInt. (bi-from n)))
      :default n))
@@ -769,6 +801,7 @@
   [x]
   (cond
     (bigint? x) #?(:clj (clojure.core/bigint x)
+                   :cljr (clojure.core/bigint x)
                    :cljs (if (eve-bigint-type? x) x (EveBigInt. (unwrap-bi x)))
                    :default x)
     (string? x) (wrap-bigint (bi-from x))
@@ -789,6 +822,15 @@
                                     (throw (js/Error. "Nonintegral decimal has no bigint value"))))
                                 (bi* u (bi-pow10 (- s))))))
                     :lpy (python/int x)
+                    :cljr (let [e (.Exponent ^clojure.lang.BigDecimal x)
+                                c (.Coefficient ^clojure.lang.BigDecimal x)]
+                            (if (>= e 0)
+                              (bi* c (bi-pow10 e))
+                              (let [div (bi-pow10 (- e))
+                                    q (bi-quot c div)
+                                    r (bi-rem c div)]
+                                (if (bi-zero? r) q
+                                  (throw (ex-info "Nonintegral decimal has no bigint value" {:value x}))))))
                     :default (bi-from (str x))))
     (ratio? x) (throw (#?(:cljs js/Error. :default ex-info)
                        #?(:cljs "Ratio has no integer value"
@@ -888,6 +930,7 @@
   [x]
   (cond
     (host-ratio? x) #?(:clj (clojure.core/numerator x)
+                       :cljr (clojure.core/numerator x)
                        :jank (clojure.core/numerator x)
                        :lpy (.-numerator x)
                        :default x)
@@ -903,6 +946,7 @@
   [x]
   (cond
     (host-ratio? x) #?(:clj (clojure.core/denominator x)
+                       :cljr (clojure.core/denominator x)
                        :jank (clojure.core/denominator x)
                        :lpy (.-denominator x)
                        :default 1)
@@ -921,6 +965,7 @@
   (cond
     (host-decimal? x) #?(:jank 0
                          :clj (.scale ^java.math.BigDecimal x)
+                         :cljr (- (.Exponent ^clojure.lang.BigDecimal x))
                          :lpy (- (.-exponent (.as-tuple x)))
                          :default 0)
     (eve-bigdec-type? x) (.-scale x)
@@ -936,6 +981,7 @@
     (host-decimal? x)
     #?(:jank x
        :clj (clojure.core/bigint (.unscaledValue ^java.math.BigDecimal x))
+       :cljr (clojure.core/bigint (.Coefficient ^clojure.lang.BigDecimal x))
        :lpy (let [t (.as-tuple x)
                   mag (reduce (fn [acc d] (clojure.core/+ (* acc 10) d)) 0 (.-digits t))]
               (if (= 1 (.-sign t)) (- mag) mag))
