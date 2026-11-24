@@ -525,6 +525,22 @@
        Object
        (toString [_] (bi-str n))))
 
+;; clojerl: an Erlang integer is already unbounded, but 123 and 123N must
+;; stay distinct (pr-number / host-pr-number spell 123N or #eve/N "123"), as
+;; basilisp's EveBigInt keeps them; (= 5 5N) holds through equiv
+#?(:clje (host-deftype EveBigInt [n]
+           clojure.lang.IHashEq
+           (hasheq [_] (if (bi-in-long? n) (hash n) (bigint-jhash n)))
+           IPrintWithWriter
+           (-pr-writer [_ w _opts] (enc/write! w (tagged-form "eve/N" (bi-str n))))
+           java.lang.Object
+           (equals [_ other]
+             (cond
+               (instance? EveBigInt other) (= n (.-n other))
+               (integer? other) (= n other)
+               :else false))
+           (toString [_] (bi-str n))))
+
 #?(:cljs (deftype EveRatio [num den]
        IEquiv
        (-equiv [_ other]
@@ -711,6 +727,7 @@
 (defn- eve-bigint-type? [x]
   #?(:cljs (instance? EveBigInt x)
      :lpy (instance? EveBigInt x)
+     :clje (instance? EveBigInt x)
      :default false))
 
 (defn- eve-ratio-type? [x]
@@ -810,6 +827,7 @@
      :cljr (clojure.core/bigint n)
      :jank (clojure.core/bigint n)
      :lpy (if (instance? EveBigInt n) n (EveBigInt. (bi-from n)))
+     :clje (if (instance? EveBigInt n) n (EveBigInt. (bi-from n)))
      :default n))
 
 (defn bigint
@@ -1060,7 +1078,7 @@
                    ;; basilisp: (double an EveBigInt) is float() of the
                    ;; wrapper, which is not a number; unwrap first.
                    :lpy (double (unwrap-bi x))
-                   :clje (float x)
+                   :clje (float (unwrap-bi x))
                    :default (double x))
     (js-bigint? x) #?(:cljs (js/Number x) :clje (float x) :default (double x))
     (ratio? x) (/ (as-double (numerator x)) (as-double (denominator x)))
