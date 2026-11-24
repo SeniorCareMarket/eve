@@ -7,7 +7,8 @@
    the S3 (a pool queue shrinking from 80 entries crashed the walk
    reading through a NIL child: offset -1 decodes as slab class 7)."
   (:refer-clojure :exclude [swap!])
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
+            [clojure.test :refer [deftest is testing]]
             [eve.host :refer [swap!]]
             [eve.core :as e]
             [eve.vec :as v]

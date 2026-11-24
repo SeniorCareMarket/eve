@@ -16,7 +16,8 @@
                             caching-hash hash-ordered-coll
                             volatile! vswap! long])
   ;; long: index-of-nil's return hint (clojerl resolves it here, the caller)
-  (:require [eve.host :refer [volatile! vswap! long]]
+  (:require #?(:clje [eve.host :refer [conj!]])
+            [eve.host :refer [volatile! vswap! long]]
             [eve.rrb-vector.protocols :as protos
              ;; the protocols by alias: a clojerl protocol is no var to refer
              :refer [-slicev -splicev]]

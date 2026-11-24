@@ -11,7 +11,7 @@
                             to-array unchecked-byte unchecked-short unchecked-int
                             unchecked-long unchecked-add-int unchecked-multiply-int
                             unchecked-inc-int unchecked-dec-int unchecked-add
-                            unchecked-multiply unchecked-inc unsigned-bit-shift-right
+                            unchecked-multiply unchecked-inc unsigned-bit-shift-right double?
                             long double class volatile! volatile? vswap! locking
                             transient persistent! conj! assoc! dissoc! disj! pop!
                             bytes shorts ints longs floats doubles objects booleans
@@ -223,6 +223,9 @@
 
 ;; the array casts, which are also the type hints ^bytes, ^longs, ...: a
 ;; hint's symbol must resolve on clojerl, and a cast has nothing to do
+;; clojerl's core has float? (every Erlang float is a double) but not double?
+(defn double? [x] (float? x))
+
 (defn bytes [a] a)
 (defn shorts [a] a)
 (defn ints [a] a)

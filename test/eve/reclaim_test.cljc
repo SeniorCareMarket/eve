@@ -6,7 +6,8 @@
    superseded among the blocks it made, so a build keeps its tree, and the value it began from; a constructor begins
    from no tree and keeps its tree only. Each checked against the allocation log (eve.deftype-proto.alloc's logging
    sio), on every host."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
+            [clojure.test :refer [deftest is testing]]
             [eve.core :as e]
             [eve.map :as em]
             [eve.set :as es]

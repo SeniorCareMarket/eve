@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **Added (clojerl): the flat handle types, so the flat cone and the clje suite load.** eve.flat.chunk gains
+  `deftype-clje`, which realizes a JVM-named deftype body onto clojerl's protocols through eve.types (as every other
+  eve type is there), and `:clje` sections for `defseqhandle`, `defmaphandle` and FlatSet; eve.flat.freeze gains
+  `:clje` FrozenValue, ConcatBatch and BasedValue (its `:cljr` bodies) and their helpers. The other clojerl walls
+  behind them are fixed in clje-only arms: on clojerl a `declare` binds its var to `:__unbound__` (so a defonce after
+  one never runs, and a declare after a definition clobbers it), and a def's value compiles in as a literal (no delay,
+  no writable host array): eve.flat.sister registers its rep converter behind a flag, eve.map keeps no int-key memo,
+  eve.flat.transfer takes its fallback path, eve.array reaches the chunk statically, and the redundant declares are
+  left out. eve.types maps `(clojure.lang.MapEntry. k v)` and binds a type's fields for its lifted print fn
+  (eve.numeric's EveRatio); eve.host has `double?`. Every other host reads each changed file to the same forms as before.
+  `bb test:clje` (one process per namespace): 18 namespaces green (was 6) and 30 of the 32 load and run; eve.overflow-test
+  (`unimplemented intern`, as before) and eve.rrb-vector-test (`:badarg`) still stop at load.
+
 - **Fixed (clojerl): compile errors show, and eve.atom loads through eve.jlog.** eve.host's IStringable extension
   for its arrays spelled the method `toString`; clojerl's protocol method is `str`, so stringifying a host array threw
   `:undef clojerl.IStringable__eve.host.ByteArray/str.1`, including inside clojerl's error formatting, which hid the

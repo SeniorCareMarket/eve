@@ -370,6 +370,17 @@
    :object-boilerplate? true
    :slab-define (fn [type-name fields forms] (clje-deftype type-name fields (parse-protocol-impls forms)))})
 
+;; The print fn jvm-translate-protos lifts out of a body's IPrintWithWriter
+;; section becomes a print-method defmethod outside the type, where the
+;; fields its body names are not in scope (eve.numeric's EveRatio prints its
+;; num and den): bind each field from the instance first.
+(defn- print-with-fields [fields print]
+  (when print
+    (let [x (gensym "x") w (gensym "w") o (gensym "o")]
+      `(fn [~x ~w ~o]
+         (let [~@(mapcat (fn [f] [(with-meta f nil) (list (symbol (str ".-" (name f))) x)]) fields)]
+           (~print ~x ~w ~o))))))
+
 (defn host-type
   "A plain type written with the JVM's names (host-deftype). Runs the
    same jvm-translate-protos pre-pass plain-type runs (trunk-numerics
@@ -380,7 +391,8 @@
    worked around with hand-written defmethods. JVM-named sections pass
    through jvm-translate-protos unchanged, as they did raw."
   [_env type-name fields parsed]
-  (let [{:keys [impls print]} (v/jvm-translate-protos parsed)]
+  (let [{:keys [impls print]} (v/jvm-translate-protos parsed)
+        print (print-with-fields fields print)]
     `(do ~@(clje-deftype type-name fields impls)
          ~@(when print [(sio/print-method-form type-name print)])
          ~type-name)))
@@ -389,7 +401,8 @@
   "A plain type (eve.deftype/deftype)."
   [_env type-name fields parsed]
   (let [[fields parsed] (sio/plain-renames fields parsed nil)
-        {:keys [impls print]} (v/jvm-translate-protos parsed)]
+        {:keys [impls print]} (v/jvm-translate-protos parsed)
+        print (print-with-fields fields print)]
     `(do ~@(clje-deftype type-name fields impls)
          ~@(when print [(sio/print-method-form type-name print)])
          ~type-name)))

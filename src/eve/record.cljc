@@ -3,6 +3,7 @@
   (:refer-clojure :exclude [defrecord])
   #?(:cljs (:require-macros [eve.record]))
   (:require [eve.host]
+            #?(:clje [eve.host :refer [unchecked-int]])
             [eve.core :as e]
             [eve.deftype]
             [eve.deftype.registry :as registry]
@@ -50,7 +51,7 @@
   ;; check, and no trial encode (the :else arm's codec/encode-key was most of
   ;; a basilisp parse-query, whose records hold keywords and symbols)
   (if (or (nil? x) (keyword? x) (symbol? x) (string? x) (boolean? x)
-          (int? x) (double? x))
+          (int? x) #?(:clje (float? x) :default (double? x)))
     x
     (assert-portable-walk! sio x path)))
 

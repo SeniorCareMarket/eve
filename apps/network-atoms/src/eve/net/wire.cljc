@@ -7,7 +7,8 @@
    not-yet-up gateway a bounded number of times before its failure throws (see create). That exception is
    establishment only; it does not widen to the CAS path, whose no-retries stance is eve.net.atom's own.
    Config: {:endpoint :domain-id :atom-id :api-key}."
-  (:require [eve.net.run :as r]
+  (:require #?(:clje [eve.host :refer [long double bytes shorts ints longs floats doubles objects booleans]])
+            [eve.net.run :as r]
             [eve.net.json :as json]
             [eve.net.bytes :as b]))
 

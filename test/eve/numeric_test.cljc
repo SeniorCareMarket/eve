@@ -4,7 +4,8 @@
    eve.numeric-tags-test) the 0x16/0x17/0x18 codec. Arithmetic is optional
    and is exercised lightly here. Source contains no 123N / 1/3 / 1.5M
    literals so the file loads on cljs / nbb."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require #?(:clje [eve.host :refer [double?]])
+            [clojure.test :refer [deftest is testing]]
             [eve.deftype.registry]
             [eve.numeric :as n]))
 
