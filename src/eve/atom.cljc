@@ -417,7 +417,24 @@
          (define (eve-pt-new addr keep base)
            (let ((a (and eve-pt-store4 (fixnum? addr) addr)))
              (vector (make-eq-hashtable) (make-eq-hashtable) #f #f (make-vector 16 0) 0
-                     (make-mutex) a keep (and a (fixnum? base) base) eve-pt-collect-q 1)))
+                     (box #f) a keep (and a (fixnum? base) base) eve-pt-collect-q 1 #f #f 0)))
+         ;; slot 6: the table's lock, a box CASed #f -> #t (box-cas!, a locked cmpxchg) and spun on: held across a few
+         ;; table operations and one store, never across a call that can block (a pthread mutex pair was ~28 ns of
+         ;; every pin and every unpin on jolt, atom-$-get-map-1k).
+         (define-syntax eve-pt-lock!
+           (syntax-rules () ((_ pt) (let ((b (vector-ref pt 6))) (let spin () (unless (box-cas! b #f #t) (spin)))))))
+         (define-syntax eve-pt-unlock!
+           (syntax-rules () ((_ pt) (begin (memory-order-release) (set-box! (vector-ref pt 6) #f)))))
+         ;; slot 0 maps a thread id to its cell, a mutable pair (least epoch . depth); a cell at depth 0 is a thread
+         ;; with no pin, kept (no cons and no delete per read) until the table holds more than 64 threads. Slots 12
+         ;; and 13: the last thread's id and its cell (one thread reading again skips the hashtable); slot 14: the
+         ;; number of cells at depth > 0.
+         (define (eve-pt-cell pt tid)
+           (if (eq? (vector-ref pt 12) tid)
+               (vector-ref pt 13)
+               (let ((c (hashtable-ref (vector-ref pt 0) tid #f)))
+                 (when c (vector-set! pt 12 tid) (vector-set! pt 13 c))
+                 c)))
          (define (eve-pt-threads pt) (vector-ref pt 0))
          (define (eve-pt-views pt) (vector-ref pt 1))
          (define (eve-pt-tmin pt) (vector-ref pt 2))
@@ -426,14 +443,14 @@
          (define (eve-pt-vmin-set! pt v) (vector-set! pt 3 v))
          ;; an empty table (the last reader's unpin) answers #f without collecting the entries
          (define (eve-pt-recompute-tmin! pt)
-           (if (fx= (hashtable-size (eve-pt-threads pt)) 0)
+           (if (fx= (vector-ref pt 14) 0)
              (begin (eve-pt-tmin-set! pt #f) #f)
            (let-values (((_ vs) (hashtable-entries (eve-pt-threads pt))))
              (let loop ((i 0) (m #f))
                (if (fx>= i (vector-length vs))
                    (begin (eve-pt-tmin-set! pt m) m)
-                   (let ((e (car (vector-ref vs i))))
-                     (loop (fx+ i 1) (if (or (not m) (< e m)) e m))))))))
+                   (let ((c (vector-ref vs i)))
+                     (loop (fx+ i 1) (if (and (fx> (cdr c) 0) (or (not m) (< (car c) m))) (car c) m))))))))
          (define (eve-pt-heap-push! pt e)
            (let* ((n (vector-ref pt 5))
                   (h (let ((h0 (vector-ref pt 4)))
@@ -487,27 +504,37 @@
                    (vm vm)
                    (else 0))))
          (define (eve-pt-pin! pt tid epoch)
-           (let* ((ht (eve-pt-threads pt))
-                  (cur (hashtable-ref ht tid #f)))
-             (if cur
-                 (let ((e (min (car cur) epoch)) (d (fx+ (cdr cur) 1)))
-                   (hashtable-set! ht tid (cons e d))
+           (let ((cur (eve-pt-cell pt tid)))
+             (if (and cur (fx> (cdr cur) 0))
+                 (let ((e (min (car cur) epoch)))
+                   (set-car! cur e)
+                   (set-cdr! cur (fx+ (cdr cur) 1))
                    (let ((tm (eve-pt-tmin pt)))
                      (when (or (not tm) (< e tm)) (eve-pt-tmin-set! pt e))))
                  (begin
-                   (hashtable-set! ht tid (cons epoch 1))
+                   (if cur
+                       (begin (set-car! cur epoch) (set-cdr! cur 1))
+                       (let ((c (cons epoch 1)))
+                         (hashtable-set! (eve-pt-threads pt) tid c)
+                         (vector-set! pt 12 tid)
+                         (vector-set! pt 13 c)))
+                   (vector-set! pt 14 (fx+ (vector-ref pt 14) 1))
                    (let ((tm (eve-pt-tmin pt)))
                      (when (or (not tm) (< epoch tm)) (eve-pt-tmin-set! pt epoch)))))
              (eve-pt-publish-val pt)))
          (define (eve-pt-unpin! pt tid)
-           (let* ((ht (eve-pt-threads pt))
-                  (cur (hashtable-ref ht tid #f)))
-             (when cur
+           (let ((cur (eve-pt-cell pt tid)))
+             (when (and cur (fx> (cdr cur) 0))
                (let ((e (car cur)) (d (cdr cur)))
                  (if (fx> d 1)
-                     (hashtable-set! ht tid (cons e (fx- d 1)))
+                     (set-cdr! cur (fx- d 1))
                      (begin
-                       (hashtable-delete! ht tid)
+                       (set-cdr! cur 0)
+                       (vector-set! pt 14 (fx- (vector-ref pt 14) 1))
+                       (let ((ht (eve-pt-threads pt)))
+                         (when (fx> (hashtable-size ht) 64)
+                           (hashtable-delete! ht tid)
+                           (when (eq? (vector-ref pt 12) tid) (vector-set! pt 12 #f) (vector-set! pt 13 #f))))
                        (let ((tm (eve-pt-tmin pt)))
                          (when (and tm (= e tm)) (eve-pt-recompute-tmin! pt)))))))
              (eve-pt-publish-val pt)))
@@ -539,9 +566,9 @@
              ((_ pt e)
               (let ((a (vector-ref pt 7)))
                 (if a
-                    (let ((m (vector-ref pt 6)))
-                      (mutex-acquire m)
-                      (let ((v e)) (eve-pt-store4 a v 5) (keep-live (vector-ref pt 8)) (mutex-release m) #t))
+                    (begin
+                      (eve-pt-lock! pt)
+                      (let ((v e)) (eve-pt-store4 a v 5) (keep-live (vector-ref pt 8)) (eve-pt-unlock! pt) #t))
                     #f)))))
          (define (eve-pt-pin-pub! pt epoch) (eve-pt-locked-pub pt (eve-pt-pin! pt (get-thread-id) epoch)))
          ;; read-pinned's pin in one call: the root epoch word's load, the pin and its publish (as eve-pt-pin-pub!),
@@ -586,14 +613,14 @@
          (define (eve-pt-pin-read! pt eoff poff)
            (let ((a (vector-ref pt 7)) (rb (vector-ref pt 9)))
              (if (and a rb)
-                 (let ((m (vector-ref pt 6)))
-                   (mutex-acquire m)
+                 (begin
+                   (eve-pt-lock! pt)
                    (let* ((e (#3%foreign-ref 'integer-32 rb eoff))
                           (v (eve-pt-pin! pt (get-thread-id) e)))
                      (eve-pt-store4 a v 5)
                      (let ((p (#3%foreign-ref 'integer-32 rb poff)))
                        (keep-live (vector-ref pt 8))
-                       (mutex-release m)
+                       (eve-pt-unlock! pt)
                        p)))
                  #f)))
          (define (eve-pt-unpin-pub! pt) (eve-pt-locked-pub pt (eve-pt-unpin! pt (get-thread-id))))
@@ -613,8 +640,9 @@
                        m)
                    (let ((p (vector-ref tvs i)))
                      (loop (fx+ i 1)
-                           (assoc-fn m (vector-ref tks i)
-                                     (vec-fn (car p) (cdr p)))))))))
+                           (if (fx> (cdr p) 0)
+                               (assoc-fn m (vector-ref tks i) (vec-fn (car p) (cdr p)))
+                               m)))))))
          #t)")
      (def ^:private pt-new* (scheme/proc "eve-pt-new"))
      (def ^:private pt-pin!* (scheme/proc "eve-pt-pin!"))
@@ -1409,17 +1437,51 @@
   #?(:jolt (not (or (== ptr alloc/NIL_OFFSET) (== ptr CLAIMED_SENTINEL)))
      :default (and (not= ptr alloc/NIL_OFFSET) (not= ptr CLAIMED_SENTINEL))))
 
+;; jolt: the root block's type-id byte (read in place, as alloc/read-header-tag) and its header constructor
+;; (eve.deftype-proto.serialize's header-ctor-array, the registry's mirror) in one Chez call: the constructor, or #f
+;; for a scalar block, an unregistered type-id or a sio that is not a slab context (read-root-value's own path then).
+;; The two were ~40 ns of every root read on jolt (atom-$-get-map-1k, 2026-11-23 ET).
+#?(:jolt
+   (def ^:private root-ctor*
+     (let [tags (alloc/jolt-ctx-tags)]
+       (scheme/eval-string
+        "(define (eve-atom-root-ctor ctag ltag u8op arr scalar)
+           (let ((cd #f) (ld #f) (vec (jolt-array-vec arr)))
+             (lambda (sio ptr)
+               (eve-alloc-unwrap sio s ctag ltag cd ld
+                 (let* ((v (jrec*-vals s))
+                        (t (eve-sio-at (vector-ref v 0) (vector-ref v 2) (vector-ref v 5) ptr 0 r a
+                             (let ((b (and (fixnum? a) (eve-region-base r))))
+                               (if b (let ((x (#3%foreign-ref 'unsigned-8 b a))) (keep-live r) x) (u8op r a))))))
+                   (if (or (not (fixnum? t)) (fx= t scalar) (fx< t 0) (fx>= t (vector-length vec)))
+                       #f
+                       (let ((c (vector-ref vec t))) (if (or (not c) (eq? c jolt-nil)) #f c))))
+                 #f))))")
+       ((scheme/proc "eve-atom-root-ctor") (nth tags 0) (nth tags 1) region/plain-load-u8-op
+                                           ser/header-ctor-array ser/SCALAR_BLOCK_TYPE_ID))))
+
 (defn- read-root-value
   "The slab-backed value at ptr, read through sio. The caller pins."
   [sio ptr]
+  ;; jolt: the type byte read and its constructor found in one Chez call (root-ctor*), the header path below for
+  ;; what it answers #f for; every other host reads the header path alone, as it did (no dead branch in its body)
   (when (live-ptr? ptr)
-    (let [type-id (alloc/read-header-tag sio ptr)]
-      (if (== type-id ser/SCALAR_BLOCK_TYPE_ID)
-        (alloc/scalar-block->value sio ptr)
-        (if-let [ctor (ser/get-header-constructor type-id)]
-          (ctor sio ptr)
-          (throw (ex-info "mmap-atom: unknown root value type-id"
-                          {:type-id type-id :ptr ptr})))))))
+    #?(:jolt (if-let [ctor (root-ctor* sio ptr)]
+               (ctor sio ptr)
+               (let [type-id (alloc/read-header-tag sio ptr)]
+                 (if (== type-id ser/SCALAR_BLOCK_TYPE_ID)
+                   (alloc/scalar-block->value sio ptr)
+                   (if-let [ctor (ser/get-header-constructor type-id)]
+                     (ctor sio ptr)
+                     (throw (ex-info "mmap-atom: unknown root value type-id"
+                                     {:type-id type-id :ptr ptr}))))))
+       :default (let [type-id (alloc/read-header-tag sio ptr)]
+                  (if (== type-id ser/SCALAR_BLOCK_TYPE_ID)
+                    (alloc/scalar-block->value sio ptr)
+                    (if-let [ctor (ser/get-header-constructor type-id)]
+                      (ctor sio ptr)
+                      (throw (ex-info "mmap-atom: unknown root value type-id"
+                                      {:type-id type-id :ptr ptr}))))))))
 
 (defn- scalar-leaf?
   "True when v is a host scalar leaf — a number, string, keyword, symbol,

@@ -11,19 +11,25 @@
    Clojure's.)"
   (:require [jolt.scheme :as scheme]))
 
+;; jolt's own atom is a Chez record (jolt-atom, host/chez/atoms.ss); its predicate answers what
+;; (instance? clojure.lang.Atom a) does, in one call where instance? was ~19 ns of every swap! on jolt
+;; (clojure.core/swap! of an inc: 45 -> ~27 ns; the atom-$-get-map-1k workload's own counter is one).
+(def ^:private jolt-atom?
+  (do (scheme/eval-string "(define (eve-hc-atom? a) (jolt-atom? a))") (scheme/proc "eve-hc-atom?")))
+
 (alter-var-root #'clojure.core/swap!
-  (fn [core]
-    (fn ([a f] (if (instance? clojure.lang.Atom a) (core a f) (.swap a f)))
-      ([a f x] (if (instance? clojure.lang.Atom a) (core a f x) (.swap a f x)))
-      ([a f x y] (if (instance? clojure.lang.Atom a) (core a f x y) (.swap a f x y)))
-      ([a f x y & more]
-       (if (instance? clojure.lang.Atom a) (apply core a f x y more) (.swap a f x y more))))))
+                (fn [core]
+                  (fn ([a f] (if (jolt-atom? a) (core a f) (.swap a f)))
+                    ([a f x] (if (jolt-atom? a) (core a f x) (.swap a f x)))
+                    ([a f x y] (if (jolt-atom? a) (core a f x y) (.swap a f x y)))
+                    ([a f x y & more]
+                     (if (jolt-atom? a) (apply core a f x y more) (.swap a f x y more))))))
 
 (alter-var-root #'clojure.core/reset!
-  (fn [core] (fn [a v] (if (instance? clojure.lang.Atom a) (core a v) (.reset a v)))))
+                (fn [core] (fn [a v] (if (jolt-atom? a) (core a v) (.reset a v)))))
 
 (alter-var-root #'clojure.core/compare-and-set!
-  (fn [core] (fn [a o n] (if (instance? clojure.lang.Atom a) (core a o n) (.compareAndSet a o n)))))
+                (fn [core] (fn [a o n] (if (jolt-atom? a) (core a o n) (.compareAndSet a o n)))))
 
 ;; swap-vals!/reset-vals! (IAtom2) and the watch surface (IRef) cast the same
 ;; way (measured, jolt v0.8.23: swap-vals! "cannot be cast to class
@@ -31,21 +37,21 @@
 ;; atom): for an atom that is not jolt's, they call its own methods, as
 ;; Clojure's do.
 (alter-var-root #'clojure.core/swap-vals!
-  (fn [core]
-    (fn ([a f] (if (instance? clojure.lang.Atom a) (core a f) (.swapVals a f)))
-      ([a f x] (if (instance? clojure.lang.Atom a) (core a f x) (.swapVals a f x)))
-      ([a f x y] (if (instance? clojure.lang.Atom a) (core a f x y) (.swapVals a f x y)))
-      ([a f x y & more]
-       (if (instance? clojure.lang.Atom a) (apply core a f x y more) (.swapVals a f x y more))))))
+                (fn [core]
+                  (fn ([a f] (if (jolt-atom? a) (core a f) (.swapVals a f)))
+                    ([a f x] (if (jolt-atom? a) (core a f x) (.swapVals a f x)))
+                    ([a f x y] (if (jolt-atom? a) (core a f x y) (.swapVals a f x y)))
+                    ([a f x y & more]
+                     (if (jolt-atom? a) (apply core a f x y more) (.swapVals a f x y more))))))
 
 (alter-var-root #'clojure.core/reset-vals!
-  (fn [core] (fn [a v] (if (instance? clojure.lang.Atom a) (core a v) (.resetVals a v)))))
+                (fn [core] (fn [a v] (if (jolt-atom? a) (core a v) (.resetVals a v)))))
 
 (alter-var-root #'clojure.core/add-watch
-  (fn [core] (fn [r k f] (if (instance? clojure.lang.Atom r) (core r k f) (do (.addWatch r k f) r)))))
+                (fn [core] (fn [r k f] (if (jolt-atom? r) (core r k f) (do (.addWatch r k f) r)))))
 
 (alter-var-root #'clojure.core/remove-watch
-  (fn [core] (fn [r k] (if (instance? clojure.lang.Atom r) (core r k) (do (.removeWatch r k) r)))))
+                (fn [core] (fn [r k] (if (jolt-atom? r) (core r k) (do (.removeWatch r k) r)))))
 
 ;; into takes the transient path for jolt's own collections only and folds
 ;; any other with persistent conj (host/chez/seq.ss jolt-into), though an eve

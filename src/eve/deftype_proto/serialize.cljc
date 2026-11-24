@@ -135,6 +135,12 @@
 ;; Byte 0 of a slab block header; the atom root is read through this registry.
 (defonce header-constructors (atom {}))
 
+;; jolt: header-constructors' entries for type-ids 0-255 mirrored in an array, written by the two registrations
+;; below (the only writers): get-header-constructor is an aget there, where the deref and a map get of an int key
+;; were ~31 ns of every root read (eve.atom/read-root-value, atom-$-get-map-1k, 2026-11-23 ET); the same answer.
+#?(:jolt (defonce header-ctor-array (object-array 256)))
+#?(:jolt (defn- mirror-header-ctor! [id f] (when (and (<= 0 id) (< id 256)) (aset header-ctor-array id f))))
+
 ;; header type-id byte → (fn [sio header-off]) that frees every block the root value owns
 (defonce header-disposers (atom {}))
 
@@ -302,7 +308,8 @@
    (swap! type-constructors assoc (int tag) ctor-fn))
   ([tag header-type-id ctor-fn]
    (swap! type-constructors assoc (int tag) ctor-fn)
-   (swap! header-constructors assoc (int header-type-id) ctor-fn)))
+   (swap! header-constructors assoc (int header-type-id) ctor-fn)
+   #?(:jolt (mirror-header-ctor! (int header-type-id) ctor-fn))))
 
 ;; eve-deftype type-id → {name-hash (fn [sio header-off])}. Types may share a
 ;; type-id (eve.deftype.registry); the 24-bit name hash in bytes 1-3 of the
@@ -402,7 +409,8 @@
 (defn register-header-constructor!
   "Register a header constructor without touching the pointer-tag entry."
   [header-type-id ctor-fn]
-  (swap! header-constructors assoc (int header-type-id) ctor-fn))
+  (swap! header-constructors assoc (int header-type-id) ctor-fn)
+  #?(:jolt (mirror-header-ctor! (int header-type-id) ctor-fn)))
 
 (defn get-type-constructor
   "The constructor for a pointer tag, or nil."
@@ -412,7 +420,9 @@
 (defn get-header-constructor
   "The constructor for a header type-id byte, or nil."
   [type-id-byte]
-  (get @header-constructors (int type-id-byte)))
+  #?(:jolt (let [id (int type-id-byte)]
+             (if (and (<= 0 id) (< id 256)) (aget header-ctor-array id) (get @header-constructors id)))
+     :default (get @header-constructors (int type-id-byte))))
 
 (defn register-header-disposer!
   "Register (fn [sio header-off]) that frees every slab block a root value of
