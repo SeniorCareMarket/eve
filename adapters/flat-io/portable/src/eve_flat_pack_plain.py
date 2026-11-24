@@ -700,6 +700,45 @@ def _entry_kv(entry):
         return None
 
 
+def _lookup_map(m, k):
+    # rt.get is singledispatch and returns default for unregistered
+    # types (EveHashMap is one). Prefer the object's own lookup.
+    for name in ("val_at", "valAt", "get"):
+        fn = getattr(m, name, None)
+        if callable(fn):
+            try:
+                return fn(k)
+            except Exception:
+                continue
+    try:
+        return m[k]
+    except Exception:
+        pass
+    try:
+        return m(k)
+    except Exception:
+        pass
+    import basilisp.lang.runtime as rt
+    return rt.get(m, k)
+
+
+def _eve_map_items(v):
+    """Entries of an EveHashMap as MapEntry or (k, v) pairs.
+
+    iter(v) as a Python mapping, and to_seq when the type is not a
+    basilisp ISeqable, yield KEYS only. Pair each key with rt.get /
+    val_at when the first element is not an entry.
+    """
+    from basilisp.lang.runtime import to_seq
+    s = to_seq(v)
+    items = list(s) if s is not None else list(v)
+    if not items:
+        return items
+    if _entry_kv(items[0]) is not None:
+        return items
+    return [(k, _lookup_map(v, k)) for k in items]
+
+
 def to_ir(v):
     if v is None:
         return {"t": T_NIL}
@@ -720,17 +759,18 @@ def to_ir(v):
     if _is_map(v):
         xs = []
         orig = []
-        # PersistentMap.items() yields [k v] entries. EveHashMap has no
-        # items and is Iterable of map-entries via hamt-seq — iterating
-        # a PersistentMap itself yields keys only, which broke to_ir.
+        # PersistentMap.items() yields entries. EveHashMap has no items;
+        # iterating it as a Python mapping yields KEYS only (ints), and
+        # _entry_kv then fails. Use basilisp seq, which is hamt-seq of
+        # MapEntries — the same walk (seq root) uses.
         name = _mod_name(v)[1]
         if name == "EveHashMap":
-            items = v
+            items = _eve_map_items(v)
         elif hasattr(v, "items"):
             items = v.items()
         else:
             items = v
-        for entry in items:
+        for entry in (items or []):
             kv = _entry_kv(entry)
             if kv is None:
                 return None
