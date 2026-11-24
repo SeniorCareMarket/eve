@@ -653,6 +653,8 @@
         (if (compare-and-set! unforced u {}) (vals u) (recur))))
     nil))
 
+(declare jlog2?)
+
 (defn- flush-zero-queue!
   "Free the zero queue's entries whose epoch no live reader pins
   (eve.tally/flush!). The safe epoch is the retire path's existing
@@ -685,7 +687,11 @@
   box.)"
   [ds]
   (let [{:keys [root-r sio retire-q journal durable-commits? base-path unforced]} ds
-        note? (and durable-commits? base-path unforced)]
+        ;; a redo-log (v2) domain notes nothing: its flush frees only blocks no durable state reaches (an old root
+        ;; is let go after its replacement is durable), so a free left unforced until the next checkpoint's
+        ;; whole-domain force can only leak in a crash — and the note copied the whole queue on every flush, which
+        ;; grows without bound while a view pins an old epoch
+        note? (and durable-commits? base-path unforced (not (jlog2? ds)))]
     ;; jolt: this process's own published pin already bounds the safe epoch from above (the safe epoch is the least
     ;; live slot's, this slot among them, and the floor only lowers it): when this slot is live and pinned at or
     ;; below the queue's head epoch, tally/flush! answers 0 at its head test with no other effect, so the 256-slot
@@ -2026,9 +2032,7 @@
                 (tally/free-unreached! sio (alloc/logged-allocs lsio))
                 (cond
                   v2?
-                  (do (jlog2-commit! ds jseq jcnt label atom-slot-idx old-ptr new-ptr plan fallback?)
-                      (when (:unforced ds)
-                        (swap! (:unforced ds) into (map (fn [o] [(alloc/decode-class-idx o) o])) @tally/*touches*)))
+                  (jlog2-commit! ds jseq jcnt label atom-slot-idx old-ptr new-ptr plan fallback?)
 
                   (and durable-commits? journal (<= (:limit journal) 1))
                   ;; J1 (journal, per-commit durability): the slot lets old go, then the
