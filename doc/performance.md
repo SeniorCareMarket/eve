@@ -251,7 +251,9 @@ these write shapes, at this pin.
   remaining gap vs October is `70e6f4c8` (eve.wire FORMAT-V1 on the
   SAB ring) after a native JS packer recovered most of the pack-rep
   cost.
-- **browser `disk-swap-counter`** — n/a (no disk domains in a page).
+- **browser `disk-swap-counter`** — n/a in `perf-all` (its page has no OPFS pool). The opt-in OPFS cell,
+  `EVE_BROWSER_PERF=opfs bb test:browser`, measured 404 µs/op in headless Chrome on 2026-11-24 ET (one run, under
+  gate load; not a perf-all cell, so not in §1). See [hosts/browser.md](hosts/browser.md).
 - **Startup shootout, hosts other than JVM source-form** — not re-run
   at this pin.
 - **Columnar bench per-cell table** — not re-run at this pin; the

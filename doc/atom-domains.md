@@ -34,7 +34,9 @@ So a domain holds at most 255 named atoms. A meta-atom (below) takes a slot of i
 
 In process, the regions are the heap regions of the host's region adapter (`make-heap-region`: a heap `ByteBuffer`
 on the JVM), and on ClojureScript the module's SharedArrayBuffers. On disk they are memory-mapped files
-(`open-mmap-region`).
+(`open-mmap-region`); in a browser, files in the origin private file system (`eve.region.opfs`, one io worker owning
+every file's sync handle, a page's tabs one owner and its followers; see [hosts/browser.md](hosts/browser.md), *Disk
+domains: the OPFS tier*). The format, the journal and recovery are the same.
 
 ### `persistent-atom-domain`
 

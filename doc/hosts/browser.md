@@ -5,11 +5,16 @@ crypto. Its constraints shape the adapters: the page must be **cross-origin isol
 `require-corp`) for SharedArrayBuffer; the page's main thread **cannot block** (`Atomics.wait` throws there); a worker
 can read no `MessagePort` synchronously; WebCrypto is promise-only. So a thread's mailbox is a ring in one
 SharedArrayBuffer every thread holds, the page creates every worker, http is synchronous `XMLHttpRequest`, and crypto
-is the portable code. There are no disk domains in a page.
+is the portable code. A page's disk domains live in the origin private file system (OPFS; *Disk domains: the OPFS
+tier*, below).
 
 ```bash
 bb test:browser                       # the thread feature's conformance and eve.thread's battery, headless Chromium
 EVE_BROWSER_PERF=1 bb test:browser    # the performance suite in a worker (a page of its own, :eve-perf-browser)
+EVE_BROWSER_OPFS=1 bb test:browser    # the OPFS tier's suite (isolated by eve-sw.js; tabs, takeover, follower relay)
+EVE_BROWSER_OPFS=1 EVE_BROWSER_COI=0 EVE_BROWSER_QUERY=eve-opfs-relay=1 bb test:browser   # the relay pool, unisolated
+EVE_BROWSER_PERF=opfs bb test:browser # disk-swap-counter on OPFS (:eve-perf-opfs-browser; opt-in, not in perf-all)
+EVE_BROWSER=firefox …                 # any of these in headless Firefox (webkit: see the gotchas)
 ```
 
 ## Correctness
@@ -26,7 +31,7 @@ EVE_BROWSER_PERF=1 bb test:browser    # the performance suite in a worker (a pag
 The page runs the thread feature's conformance (`eve.thread-host-test`), eve.thread's battery, the meta-atom's suite and
 eve.thread.fold's suite in a worker, and checks three rows only the main thread can show: it declares `:block :never`,
 polls, and refuses a wait. The data-structure suites, the fixtures, eve.net's suites and the domain cell are not run in
-a browser (they run on Node; a page has no disk domain).
+a browser (they run on Node). The OPFS tier's suites are their own pages (`EVE_BROWSER_OPFS=1`, above).
 
 ## Performance
 
@@ -72,12 +77,44 @@ SAB is a cross-origin isolated page, SW the service worker's synchronous-XHR rel
 SW columns are ≤ (coarse clocks on an unisolated page). Firefox's SW relay is refused by design. One Chromium SW
 `px-call-rtt` load of three failed with a NetworkError in the relay's synchronous XHR (see docs/eve-dom.md).
 
+## Disk domains: the OPFS tier
+
+A persistent atom in a page is the same `persistent-atom-domain` / `{:persistent path}` atom as on Node, its files in
+the origin's private file system. OPFS writes a file synchronously only through a `FileSystemSyncAccessHandle`, which
+is exclusive to the worker that opened it, so `eve.opfs.mount/mount!` starts **one io worker** (`eve/opfs_io.js`)
+that opens every file, and every eve worker reaches it through a request block in a SharedArrayBuffer (a lock, a
+doorbell, a done word; the caller waits with `Atomics.wait`). A file's bytes live in a pool slot every worker holds, so
+a region reads and writes them in place; only a sync goes to the io worker, which writes the 4 KB pages whose 64-bit hash
+changed since it last wrote them, through a fixed bounce buffer (a sync handle refuses a view over a growable buffer).
+
+```clojure
+;; on the page
+(-> (eve.opfs.boot/boot! {:opfs {:root "my-app"} :start #(start-main-worker!)})
+    (.then (fn [{:keys [pool relay]}] ...)))
+;; in a worker
+(def a (eve.atom/persistent-atom {:id :app/state :persistent "/db"} {:n 0}))
+```
+
+| Piece | What it does |
+|---|---|
+| `eve.opfs.boot/boot!` | isolates the page (registers `/eve-sw.js?coi=1`, which adds COOP/COEP, and reloads once; the guard is in `sessionStorage`), mounts the pool, starts main. `:isolate false` keeps the page unisolated (the relay pool) |
+| tabs | one tab **owns** the files (its io worker holds the Web Lock `eve:<root>`; a term in `.eve-term`); others are **followers** (`eve.opfs.follow/follower-atom`): a deref is cached until an owner commit is heard, a `swap!` sends a compare-and-set to the owner. When the owner's tab closes a follower takes over (term + 1) and recovers from the journal |
+| exactly once | a follower's request id `[client seq]` rides in the owner's jlog commit record (`eve.atom/*request-id*`); anchors keep each client's highest applied seq (`eve.atom/applied-request-seq`), so a resend of what a dead owner applied is answered, not applied again |
+| the relay | eve's one service worker (`adapters/sw/browser/eve-sw.js`) routes `/eve-sw/opfs/call` (a synchronous XHR; 504 then resent under the same key, answered once, reply kept 30 s), `/next` (the serving tab's long poll, by host and term; a newer term ends older polls and takes back calls they held), `/reply`, `/ping`. A follower whose owner is in another tab reaches it this way. URLs resolve against `location.origin` (eve threads have `blob:` locations) |
+| the relay pool | a page that is **not cross-origin isolated** shares no memory between workers, but `new WebAssembly.Memory({shared: true}).buffer` still makes a growable SharedArrayBuffer in Chrome, Firefox and WebKit (it cannot be posted). So the program's main worker is the domain host: it holds the request block and the slots, and talks to its io worker (the kernel URL at `?eve-opfs-io=1`; Firefox does not let the service worker control a nested `blob:` worker) over the relay — a sync's changed bytes out (diffed against a shadow copy), an open's file bytes back. eve's memory is then that one worker's |
+| recovery | a fresh root (no live worker holds the file) is read from storage; a commit survives a killed browser (the relaunch test: same profile, fixed port, 7 commits then a kill, 7 read back) |
+
+Measured (`EVE_BROWSER_PERF=opfs`, this box, 2026-11-24 ET, nice 19, one run, under gate load): `disk-swap-counter`
+404 µs/op in headless Chrome (4096 ops), durable (journal batch 1), `readwrite-unsafe` handles. Not a `perf-all`
+cell: the browser row's `disk-swap-counter` stays n/a there, since that page has no OPFS pool.
+
 ## How eve is built in a browser
 
 | Feature | Adapter | How |
 |---|---|---|
 | thread | `thread/browser` | dedicated Web Workers by the fat-kernel route: a Blob bootstrap `importScripts` the kernel (the program itself, a `:simple` build with no output wrapper, its URL found from the build's `manifest.edn` by synchronous XHR); every thread's mailbox a 256 KB ring in one SharedArrayBuffer; workers created by the page from a spawn ring it pumps (`Atomics.waitAsync`), because a blocked worker never turns its own event loop to start a child; a worker closes itself once its entry returns and its exit notice is sent |
 | http | `http/browser` | synchronous `XMLHttpRequest`; on the main thread bytes come as an `x-user-defined` binary string; a worker's batch (a level of a network atom's blocks) is posted to the page, fetched with `Promise.all`, the worker waiting on `Atomics.wait` |
+| region, slab-io (disk) | `opfs/browser` | `eve.region.opfs` over `eve.opfs`'s io worker (above) |
 | crypto | `crypto/portable` | `eve.net.portable-crypto` (WebCrypto is promise-only) |
 | process | `process/node` | its browser-safe parts: `Date.now`, `crypto.getRandomValues`, an interval heartbeat |
 | slab, region, typed-view, slab-io, coll, types, encoding, int32, codec | as ClojureScript on Node | SharedArrayBuffer slabs through DataViews, `Atomics` |
@@ -105,7 +142,14 @@ SW columns are ≤ (coarse clocks on an unisolated page). Firefox's SW relay is 
   0.95–1.24×, the two builds the most (1.05–1.32× in the first measurement, one run each), so Node keeps fixed buffers
   (it has no cap). `ps/init!` takes `:growable? false` for a page that starts few workers
   and wants the speed.
-- **No disk domains, no http-server**; headers the browser forbids are dropped; a batch's answers are capped at 8 MB.
+- **No http-server**; headers the browser forbids are dropped; a batch's answers are capped at 8 MB.
+- **Disk domains only in workers, and only after the pool mounts**: `eve.opfs.boot/boot!` mounts the OPFS pool
+  before any eve thread starts; a worker spawned before it has no file pool.
+- **WebKit (Playwright's) does not pass the OPFS suite on this box**: `RangeError: Out of memory` creating a
+  SharedArrayBuffer in the suite's reader worker, in both the header-isolated and the service-worker runs, on the
+  tree that passed earlier too (environmental; not fixed). Chrome and Firefox pass.
+- **Firefox's synchronous manifest read fails on an unisolated page** (`eve.thread-host`'s kernel lookup): the relay
+  page loads the kernel by `<script src>` instead; not fixed in `thread-host`.
 - A page reading a network atom synchronously on its main thread stalls its workers' batches (above).
 
 ## Future directions
