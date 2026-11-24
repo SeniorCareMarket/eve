@@ -58,13 +58,13 @@ many workers), `fuzz`, `conformance`, `lustre`, `repro`, `slab-leak`, and the be
 | `atom-reset-vec-1k` | 11.4 ms | 128 | 7.7 |
 | `sorted-set-build-200` | 27.7 ms | 64 | 5.2 |
 | `disk-swap-counter` | 197.3 µs | 8192 | 2.9 |
-| `thread-submit-64` | 20.1 ms | 64 | 8.0 |
+| `thread-submit-64` | 12.0 ms | 128 | 4.8 |
 
-Measured 2026-11-23 11:34–11:36 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `441ae29f` plus the pack-plain wire-encode fix, by `bb scripts/perf-all.clj`, one host at a time, load1 2.49; a round of at least 1 s. `thread-submit-64` is 20.1 ms (it was 62.8 ms after the MessagePort fix on this tree, and 7.6 ms in the 2026-10-21 published table).
+The `thread-submit-64` cell was re-measured 2026-11-24 1:04–1:16 PM ET on this box (J, Linux x86_64, Temurin 21.0.13), median of five official cells (load1 2.93–6.68). It is 12.0 ms (median 11,984,375 ns/op; it was 20.1 ms after the pack-plain wire-encode fix, 62.8 ms after the MessagePort fix, and 7.6 ms in the 2026-10-21 published table). The other cells in this table remain the 2026-11-23 11:34–11:36 PM ET `perf-all` run.
 <!-- /perf:cljs -->
 
 Reading it: ~4× the JVM on swaps (a counter swap 44.0 µs, a 1,000-key map's 15.7 µs). Reads are close to the JVM (a
-1,000-key map's deref 5.3 µs against 2.7 µs; a small deref 4.3 µs against 2.9 µs). `thread-submit-64` is 20.1 ms (8.0× the JVM's 2.5 ms).
+1,000-key map's deref 5.3 µs against 2.7 µs; a small deref 4.3 µs against 2.9 µs). `thread-submit-64` is 12.0 ms (4.8× the JVM's 2.5 ms).
 A disk-domain swap is 197 µs. The browser ran the same compiled code faster on every in-memory workload in this run.
 
 What sets ClojureScript's numbers: V8 compiles the slab I/O to typed-array access and the allocator's bitmap scans are

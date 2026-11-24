@@ -46,13 +46,13 @@ a browser (they run on Node). The OPFS tier's suites are their own pages (`EVE_B
 | `atom-reset-vec-1k` | 6.9 ms | 256 | 4.7 |
 | `sorted-set-build-200` | 13.9 ms | 128 | 2.6 |
 | `disk-swap-counter` | n/a | — | — |
-| `thread-submit-64` | 20.5 ms | 128 | 8.1 |
+| `thread-submit-64` | 17.1 ms | 64 | 6.8 |
 
-Measured 2026-11-23 11:34–11:36 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `441ae29f` plus the pack-plain wire-encode fix, by `bb scripts/perf-all.clj`, one host at a time, load1 2.49; a round of at least 1 s. `disk-swap-counter` is n/a (no disk domains in a browser page). `thread-submit-64` is 20.5 ms (it was 140.0 ms after the MessagePort fix; 3.3 ms on this box at `77b649aa5`, 2026-10-21, load1 1.52).
+The `thread-submit-64` cell was re-measured 2026-11-24 1:15–1:16 PM ET on this box (J, Linux x86_64, Temurin 21.0.13), one official cell in the same session as the cljs/nbb 5/5 (load1 4.74). It is 17.1 ms (17,093,750 ns/op; it was 20.5 ms after the pack-plain wire-encode fix, 140.0 ms after the MessagePort fix; 3.3 ms on this box at `77b649aa5`, 2026-10-21, load1 1.52). `disk-swap-counter` is n/a (no disk domains in a browser page). The other cells in this table remain the 2026-11-23 11:34–11:36 PM ET `perf-all` run.
 <!-- /perf:browser -->
 
 Reading it: a small deref 2.9 µs, within noise of the JVM's 2.9 µs, and within ~1.6–1.7× of the JVM on swaps. No disk
-domains in a page. 64 tasks to the page's workers: 20.5 ms in this run (140.0 ms after the MessagePort fix; 3.3 ms at `77b649aa5` on this box).
+domains in a page. 64 tasks to the page's workers: 17.1 ms in this run (20.5 ms after the pack-plain wire-encode fix; 140.0 ms after the MessagePort fix; 3.3 ms at `77b649aa5` on this box).
 
 What sets a page's numbers: the same compiled ClojureScript as Node, on the same V8, with the module slab in each
 worker; a network atom from a browser is bound by the browser's six connections per origin (a cold deref of ~1,100

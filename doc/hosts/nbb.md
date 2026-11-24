@@ -53,13 +53,13 @@ compiled ClojureScript's `thread-domain` suite from the ~3.8 GB its baseline not
 | `atom-reset-vec-1k` | 88.3 ms | 16 | 60 |
 | `sorted-set-build-200` | 197.0 ms | 8 | 37 |
 | `disk-swap-counter` | 1.5 ms | 1024 | 22 |
-| `thread-submit-64` | 80.6 ms | 16 | 32 |
+| `thread-submit-64` | 18.0 ms | 64 | 7.2 |
 
-Measured 2026-11-23 11:34–11:36 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `441ae29f` plus the pack-plain wire-encode fix, by `bb scripts/perf-all.clj`, one host at a time, load1 2.49; a round of at least 1 s. `thread-submit-64` is 80.6 ms (it was 247.6 ms after the MessagePort fix, and 11.0 ms in the 2026-10-21 published table).
+The `thread-submit-64` cell was re-measured 2026-11-24 1:04–1:16 PM ET on this box (J, Linux x86_64, Temurin 21.0.13), median of five official cells (load1 2.93–6.68). It is 18.0 ms (median 17,984,375 ns/op; it was 80.6 ms after the pack-plain wire-encode fix, 247.6 ms after the MessagePort fix, and 11.0 ms in the 2026-10-21 published table). The other cells in this table remain the 2026-11-23 11:34–11:36 PM ET `perf-all` run.
 <!-- /perf:nbb -->
 
 Reading it: faster than babashka on every in-memory workload that both completed (a counter swap 565 µs against 1.4 ms, a 1,000-key
-map's 141 µs against 2.8 ms, a small deref 23.4 µs against 97.2 µs). `thread-submit-64` is 80.6 ms (babashka 31.3 ms).
+map's 141 µs against 2.8 ms, a small deref 23.4 µs against 97.2 µs). `thread-submit-64` is 18.0 ms (babashka 31.3 ms).
 
 What sets nbb's numbers: sci interprets every call, and eve's types are sci records answering eve's protocols, so
 nbb pays babashka's interpretation cost on V8 rather than SubstrateVM, with the module slab's DataView reads beneath.

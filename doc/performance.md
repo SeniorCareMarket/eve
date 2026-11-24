@@ -59,7 +59,7 @@ unported, so the official suite is not expected to compile yet.
 
 ### ClojureScript (node) — J, 23:34–23:36 ET, exit 0, 43 s wall, load1 2.49→5.71
 
-`thread-submit-64` is 20,140,625 ns/op (20.1 ms; it was 62,812,500 after the MessagePort fix).
+`thread-submit-64` is 11,984,375 ns/op (12.0 ms, median of five official cells, 2026-11-24 1:04–1:16 PM ET; it was 20,140,625 after the pack-plain wire-encode fix, 62,812,500 after the MessagePort fix).
 
 | workload | ns/op |
 |---|---:|
@@ -71,11 +71,11 @@ unported, so the official suite is not expected to compile yet.
 | atom-reset-vec-1k | 11,421,875 |
 | sorted-set-build-200 | 27,718,750 |
 | disk-swap-counter | 197,265 |
-| thread-submit-64 | 20,140,625 |
+| thread-submit-64 | 11,984,375 |
 
 ### browser — J, 23:34–23:36 ET, exit 0, 48 s wall, load1 2.49→5.71
 
-`disk-swap-counter` is n/a (`require is not defined` — no disk domains in a page). `thread-submit-64` is 20,460,937 ns/op (20.5 ms; it was 140,000,000 after the MessagePort fix, and 3,251,953 on this box at `77b649aa5`, 2026-10-21, load1 1.52).
+`disk-swap-counter` is n/a (`require is not defined` — no disk domains in a page). `thread-submit-64` is 17,093,750 ns/op (17.1 ms, official cell 2026-11-24 1:15–1:16 PM ET; it was 20,460,937 after the pack-plain wire-encode fix, 140,000,000 after the MessagePort fix, and 3,251,953 on this box at `77b649aa5`, 2026-10-21, load1 1.52).
 
 | workload | ns/op |
 |---|---:|
@@ -87,7 +87,7 @@ unported, so the official suite is not expected to compile yet.
 | atom-reset-vec-1k | 6,898,437 |
 | sorted-set-build-200 | 13,945,312 |
 | disk-swap-counter | n/a |
-| thread-submit-64 | 20,460,937 |
+| thread-submit-64 | 17,093,750 |
 
 ### babashka — J, 21:02–21:02 ET, exit 0, 31 s wall, load1 2.50→1.91
 
@@ -119,7 +119,7 @@ unported, so the official suite is not expected to compile yet.
 
 ### nbb — J, 23:34–23:36 ET, exit 0, 40 s wall, load1 2.49→5.71
 
-`thread-submit-64` is 80,562,500 ns/op (80.6 ms; it was 247,625,000 after the MessagePort fix).
+`thread-submit-64` is 17,984,375 ns/op (18.0 ms, median of five official cells, 2026-11-24 1:04–1:16 PM ET; it was 80,562,500 after the pack-plain wire-encode fix, 247,625,000 after the MessagePort fix).
 
 | workload | ns/op |
 |---|---:|
@@ -131,7 +131,7 @@ unported, so the official suite is not expected to compile yet.
 | atom-reset-vec-1k | 88,312,500 |
 | sorted-set-build-200 | 197,000,000 |
 | disk-swap-counter | 1,492,187 |
-| thread-submit-64 | 80,562,500 |
+| thread-submit-64 | 17,984,375 |
 
 ### basilisp (lpy) — J, 21:03–21:06 ET, exit 0, 172 s wall, load1 2.81→1.30
 
@@ -246,11 +246,11 @@ these write shapes, at this pin.
 - **clojerl host suite** — flat-io conformance is 11 / 260 / 0 / 0.
   The `:clje` `long`/`alength` refer is in this batch; official
   `bb test:clje` was not re-run and handle macros are still unported.
-- **browser `thread-submit-64`** — 20.5 ms on this tree (was 140.0 ms
-  after the MessagePort fix); 3.3 ms on this box at `77b649aa5`. The
-  remaining gap vs October is `70e6f4c8` (eve.wire FORMAT-V1 on the
-  SAB ring) after a native JS packer recovered most of the pack-rep
-  cost.
+- **browser `thread-submit-64`** — 17.1 ms on this tree (was 20.5 ms
+  after the pack-plain wire-encode fix, 140.0 ms after the MessagePort
+  fix); 3.3 ms on this box at `77b649aa5`. The remaining gap vs
+  October is still FORMAT-V1 on the thread path (decode and other
+  per-message cost).
 - **browser `disk-swap-counter`** — n/a in `perf-all` (its page has no OPFS pool). The opt-in OPFS cell,
   `EVE_BROWSER_PERF=opfs bb test:browser`, measured 404 µs/op in headless Chrome and 979 µs/op in headless Firefox on 2026-11-24 ET (one run, under
   gate load; not a perf-all cell, so not in §1). See [hosts/browser.md](hosts/browser.md).
