@@ -1959,7 +1959,7 @@
    f
    args
    exclusive?]
-  (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? false))
+  (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? false true))
 
 (defn- swap-attempt-vals!
   [ds
@@ -1968,7 +1968,8 @@
    f
    args
    exclusive?
-   want-vals?]
+   want-vals?
+   answer?]
   (let [root-r (:root-r ds) sio (:sio ds) durable-commits? (:durable-commits? ds) journal (:journal ds)
         pin-e (do (refresh-slabs! ds) (mem/-load-i32 root-r d/ROOT_EPOCH_OFFSET))]
     (pin-epoch! ds pin-e)
@@ -2004,7 +2005,9 @@
                             ;; model: what leaves an atom is flat), under this attempt's pin
                           (let [delivery (let [w? (or want-vals? (watched? ds atom-slot-idx))
                                                dv (when w? (deliver-value ds atom-slot-idx old-val))]
-                                           [dv dv (read-answer ds atom-slot-idx old-val (answer-epoch root-r pin-e ptr-off old-ptr))])]
+                                           (if (or w? answer?)
+                                             [dv dv (when answer? (read-answer ds atom-slot-idx old-val (answer-epoch root-r pin-e ptr-off old-ptr)))]
+                                             ::none))]
                               ;; nothing published: whatever f allocated on the way to the old value is held by nothing
                             (tally/free-unreached! sio (alloc/logged-allocs lsio))
                             (alloc/stop-logging! lsio)
@@ -2074,10 +2077,13 @@
                                   ;; [old new] flat when a watcher or swap-vals! reads them;
                                   ;; swap!'s answer (a view, or flat) for the new root always
                                 (let [w? (or want-vals? (watched? ds atom-slot-idx))
-                                      new-raw (read-root-value sio new-ptr)
-                                      delivery [(when w? (deliver-value ds atom-slot-idx old-val))
-                                                (when w? (deliver-value ds atom-slot-idx new-raw))
-                                                (read-answer ds atom-slot-idx new-raw (answer-epoch root-r pin-e ptr-off new-ptr))]]
+                                      need? (or w? answer?)
+                                      new-raw (when need? (read-root-value sio new-ptr))
+                                      delivery (if need?
+                                                 [(when w? (deliver-value ds atom-slot-idx old-val))
+                                                  (when w? (deliver-value ds atom-slot-idx new-raw))
+                                                  (when answer? (read-answer ds atom-slot-idx new-raw (answer-epoch root-r pin-e ptr-off new-ptr)))]
+                                                 ::none)]
                                   (alloc/stop-logging! lsio)
                                   [:ok new-val delivery]))
                               (let [offs (alloc/logged-allocs lsio)]
@@ -2122,18 +2128,21 @@
    callback that swaps cannot deadlock the domain. It answers the new value
    delivered flat under the attempt's pin (the value model: what leaves an
    atom is flat); with want-vals?, [old new], both delivered flat
-   (swap-vals!, reset-vals!)."
-  ([ds atom-slot-idx f args] (mmap-swap! ds atom-slot-idx f args false))
-  ([ds atom-slot-idx f args want-vals?]
+   (swap-vals!, reset-vals!). answer? (default true) builds that answer
+   (a view outside `$`); false is for a write whose caller does not keep
+   the answer, so no view pin is left for the host GC to end."
+  ([ds atom-slot-idx f args] (mmap-swap! ds atom-slot-idx f args false true))
+  ([ds atom-slot-idx f args want-vals?] (mmap-swap! ds atom-slot-idx f args want-vals? true))
+  ([ds atom-slot-idx f args want-vals? answer?]
   (let [ptr-off (d/atom-slot-offset atom-slot-idx d/ATOM_SLOT_PTR_OFFSET)]
     (loop [attempt 0]
       (when (>= attempt d/MAX_SWAP_RETRIES)
         (throw (ex-info "mmap-atom swap!: max retries exceeded" {:attempts attempt})))
       (let [[tag result delivery] (with-domain-write ds false
                                     (fn [exclusive?]
-                                      (let [r (if want-vals?
-                                                (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? true)
-                                                (swap-attempt! ds ptr-off atom-slot-idx f args exclusive?))]
+                                      (let [r (if (and (not want-vals?) answer?)
+                                                (swap-attempt! ds ptr-off atom-slot-idx f args exclusive?)
+                                                (swap-attempt-vals! ds ptr-off atom-slot-idx f args exclusive? want-vals? answer?))]
                                         (when (= :ok (first r))
                                           (try-flush-retires! ds))
                                         r)))]
@@ -2690,7 +2699,7 @@
                          ;; every attempt overwrites: the committed one's counts
                          (vreset! got (if (some? have) have slot-idx))
                          (if (some? have) reg (ecore/assoc reg kw-str slot-idx))))
-                [])
+                [] false false)
     @got))
 
 (defn- read-registry [ds]
@@ -2711,11 +2720,11 @@
         ;; a redo log keeps the claim (the slot's CLAIMED pointer and name hash) durable before the slot is used
         _ (when (jlog? ds) (jlog-note-claim! ds mine))]
     (when (some? initial-val)
-      (mmap-swap! ds mine (constantly initial-val) []))
+      (mmap-swap! ds mine (constantly initial-val) [] false false))
     (let [slot (register-name! ds kw-str mine)]
       (when-not (== slot mine)
         ;; nil is the NIL root pointer: the slot is free again
-        (mmap-swap! ds mine (constantly nil) []))
+        (mmap-swap! ds mine (constantly nil) [] false false))
       (swap! (-registry-cache domain) assoc kw-str slot)
       (MmapAtom. ds slot))))
 
@@ -2935,7 +2944,7 @@
   (let [ds (open-heap-domain! opts)
         domain (MmapAtomDomain. ds (clojure.core/atom {}))]
     (alloc/init-domain-views!)
-    (mmap-swap! ds 0 (constantly initial-value) [])
+    (mmap-swap! ds 0 (constantly initial-value) [] false false)
     (create-atom-domain! domain initial-value)
     domain))
 

@@ -14,8 +14,7 @@
             [eve.core :as ec]
             [eve.host :refer [swap!]]
             [eve.process :as proc]
-            [eve.deftype-proto.data :as d]
-            [eve.view :as view]))
+            [eve.deftype-proto.data :as d]))
 
 (defn- fresh
   "An atom of a new in-process domain, holding v."
@@ -55,20 +54,7 @@
     (is (= [{:i 0} {:i 1} {:i 2}] (vec r)))
     (is (every? (fn [x] (not (stored? x))) r))))
 
-(defn- in-read-end-c
-  "The post-region flush assertion asks what is freed with no reader pinned.
-   In read-end :gc (B), swap!/deref answers are views that hold pins until
-   the host GC collects them (same reason as eve.record-test's hidden-payloads,
-   2026-11-24 ET: on glojure (queued) was 22 after the first flush)."
-  [f]
-  #?(:org.babashka/nbb (f) :lpy (f)
-     :default (let [mode (view/read-end-mode)]
-                (view/set-read-end! :commit)
-                (try (f) (finally (view/set-read-end! mode))))))
-
 (deftest what-a-region-read-is-not-freed-while-it-runs
-  (in-read-end-c
-   (fn []
   (let [a (fresh {:xs (vec (range 100))})
         queued (fn [] (count @(:retire-q (atom/-domain-state a))))
         [before after held]
@@ -81,10 +67,22 @@
     (is (= (vec (range 100)) (vec before)) "the value read first, read again after the writes")
     (is (= (vec (range 19 119)) (vec after)))
     (is (<= 20 held) "every write's retired blocks still queued: the region's pin is older than each")
-    (proc/sleep-ms! 60)
-    (swap! a (fn [m] (ec/assoc m :n 1)))
-    (is (zero? (queued)) "freed at the first flush after the region let go")
-    (is (not (pinned? a)))))))
+    ;; The first flush after `$` must free those region-era retirees. It cannot
+    ;; also empty the queue in read-end :gc (B): the flush write's own answer
+    ;; is a view that already pins the new epoch when try-flush-retires! runs
+    ;; (mmap-swap! builds the answer, then flushes), so that write's retirees
+    ;; stay. Measured 2026-11-24 ET, America/New_York: after `$` the queue is
+    ;; epochs 4..24 and no pin is held; after the flush write, only epoch 25
+    ;; remains — 22 entries on both glojure and the JVM. The old (zero?
+    ;; (queued)) assertion therefore passed only under read-end :commit (C),
+    ;; where the write holds no pin, not because the JVM's Cleaner was faster.
+    (let [ep (first (atom/version a))]
+      (proc/sleep-ms! 60)
+      (swap! a (fn [m] (ec/assoc m :n 1)))
+      (is (zero? (count (filter (fn [e] (<= (:epoch e) ep))
+                                @(:retire-q (atom/-domain-state a)))))
+          "the region's retired blocks are freed at the first flush after the region let go"))
+    (is (not (pinned? a)))))
 
 (deftest a-region-inside-another-joins-it
   (let [a (fresh {:k {:v 1}})

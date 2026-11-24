@@ -47,28 +47,6 @@
         (is (= 42 @x2))
         (a/close-atom-domain! dom2)))))
 
-(defn- settle-construction-views!
-  "Construction may pin views for reads nobody holds (read-end B). Those
-   releases run on the JVM/bb Cleaner thread, so a snapshot taken too
-   early races the table the portable model then freezes. Drain
-   collectible views and wait until the pin table is stable across a
-   GC cycle; held views stay."
-  [_ds]
-  #?(:cljs nil
-     :clje nil
-     :lpy nil
-     :cljr nil
-     :glj nil
-     :default
-     (loop [i 0 prev ::unset]
-       (System/gc)
-       (Thread/sleep 50)
-       (when-let [s (resolve 'eve.view/sweep!)] (s))
-       (let [cur (into {} @(:pins _ds))]
-         (if (or (= cur prev) (>= i 40))
-           cur
-           (recur (inc i) cur))))))
-
 (defn- published-epoch
   "The worker slot's CURRENT_EPOCH word (0 when nothing is pinned)."
   [ds]
@@ -124,7 +102,6 @@
                         :view-unpin (#'a/view-unpin! ds epoch)))
         live (fn [] {:pins (into {} @(:pins ds)) :published (published-epoch ds)})]
     (try
-      (settle-construction-views! ds)
       (let [start (into {} @(:pins ds))]
         (is (= (portable-published start) (published-epoch ds))
             "the word already published matches the table (construction may hold views)")
