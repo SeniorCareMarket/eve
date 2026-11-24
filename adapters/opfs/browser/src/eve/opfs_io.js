@@ -12,12 +12,23 @@
 // written through views no region op sees (a slab's), so only the bytes can tell — and both flush. The handle's
 // read/write refuse a view over a growable buffer (measured in Chromium and Firefox, W0), so bytes go through a
 // fixed bounce buffer, and a page's hash is the bounce copy's: what the file holds.
+//
+// Ownership (W7): one tab of the origin owns a root's files, the one whose io worker holds the Web Lock
+// 'eve:<root>'. A tab that finds it held is a follower: its requests are refused (STATUS 2, EveNotOwner) and its
+// lock request stays queued; when the owner's tab closes or dies the browser lets its lock (and its handles) go and
+// the next follower in the queue takes over: it bumps the root's term (.eve-term, a u32), sets ROLE and TERM in the
+// request block (waiters wake), tells its page, and announces {owner: tab, term} on the BroadcastChannel
+// 'eve:<root>'. Its workers then open the files, and a domain's root read in fresh is recovered (eve.atom), as after
+// a crash. Handles a dead owner held may outlive it a moment (exclusive mode): opens retry while the browser says
+// NoModificationAllowedError.
 'use strict';
-const LOCK = 0, DOORBELL = 1, DONE = 2, OP = 3, STATUS = 4, R0 = 5, R1 = 6, R2 = 7, NARGS = 8, NSTR = 9, ARGS = 16;
+const LOCK = 0, DOORBELL = 1, DONE = 2, OP = 3, STATUS = 4, R0 = 5, R1 = 6, R2 = 7, NARGS = 8, NSTR = 9,
+      ROLE = 10, TERM = 11, SEEN_TERM = 12, ARGS = 16;
+const FOLLOWER = 0, OWNER = 1;
 const OPEN = 1, PERSIST = 2, EXISTS = 3, SIZE = 4, CREATE_EXCL = 5, RENAME = 6, DELETE = 7, CLOSE_ALL = 8,
       MKDIRS = 9, PERSIST_CHANGED = 10;
 const PAGE = 4096, BOUNCE = 1 << 20;
-let ctl, ctlBytes, argsCap, strBase, slots, root, nextSlot = 0, handleOpts;
+let ctl, ctlBytes, argsCap, strBase, slots, root, nextSlot = 0, handleOpts, tab, channel;
 const freeSlots = [];           // slots CLOSE_ALL let go, reused before fresh ones
 const byPath = new Map();       // path -> {slot, handle}
 const bySlot = [];              // slot -> {path, handle, hashes: Int32Array, 2 per page}
@@ -90,6 +101,18 @@ function readInto(handle, slot, from, to) {
   }
 }
 
+// A sync handle, retried while a dead owner's handle on the file is still being let go (exclusive mode)
+async function syncHandle(fh) {
+  const until = Date.now() + 15000;
+  for (let wait = 5; ; wait = Math.min(250, wait * 2)) {
+    try { return await fh.createSyncAccessHandle(handleOpts); }
+    catch (err) {
+      if (!(err && err.name === 'NoModificationAllowedError') || Date.now() > until) throw err;
+      await new Promise(r => setTimeout(r, wait));
+    }
+  }
+}
+
 async function open(path, size) {
   let e = byPath.get(path), fresh = 0;
   if (!e) {
@@ -97,7 +120,7 @@ async function open(path, size) {
     if (freeSlots.length === 0 && nextSlot >= slots.length)
       throw new Error('eve.opfs: the pool has no free slot (' + slots.length + ' files)');
     const fh = await fileHandle(path, true);
-    const handle = await fh.createSyncAccessHandle(handleOpts);
+    const handle = await syncHandle(fh);
     const slot = freeSlots.length > 0 ? freeSlots.pop() : nextSlot++;
     e = {slot, handle, path};
     byPath.set(path, e); bySlot[slot] = e;
@@ -241,14 +264,37 @@ function closeAll() {
   byPath.clear();
 }
 
+// This tab owns the root now: the term goes up (in the root's .eve-term, read and written under the lock), the
+// request block says so, and so do the page and the channel
+async function takeOver() {
+  const fh = await root.getFileHandle('.eve-term', {create: true});
+  const h = await syncHandle(fh);
+  const t = new Uint32Array(1);
+  try {
+    if (h.getSize() >= 4) h.read(t, {at: 0});
+    t[0] += 1;
+    h.write(t, {at: 0}); h.flush();
+  } finally { h.close(); }
+  const term = t[0];
+  Atomics.store(ctl, TERM, term); Atomics.store(ctl, SEEN_TERM, term);
+  Atomics.store(ctl, ROLE, OWNER); Atomics.notify(ctl, ROLE);
+  channel.postMessage({eveOwner: tab, term});
+  self.postMessage({eveOpfsRole: 'owner', term});
+}
+
 function strings() {
   const n = ctl[NSTR];
   if (n === 0) return [];
   return decoder.decode(ctlBytes.slice(strBase, strBase + n)).split('\0');
 }
 
+class EveNotOwner extends Error {}
+EveNotOwner.prototype.name = 'EveNotOwner';
+
 async function serve() {
   const op = ctl[OP], nargs = ctl[NARGS];
+  if (Atomics.load(ctl, ROLE) !== OWNER)
+    throw new EveNotOwner('this tab follows the owner of ' + root.name + ' (term ' + Atomics.load(ctl, SEEN_TERM) + ')');
   const s = strings();
   switch (op) {
     case OPEN: return open(s[0], ctl[ARGS]);
@@ -269,15 +315,28 @@ function fail(err) {
   const msg = encoder.encode(String((err && err.name ? err.name + ': ' : '') + (err && err.message || err)));
   const n = Math.min(msg.length, ctlBytes.length - strBase);
   ctlBytes.set(msg.subarray(0, n), strBase);
-  ctl[NSTR] = n; ctl[STATUS] = 1;
+  ctl[NSTR] = n; ctl[STATUS] = err instanceof EveNotOwner ? 2 : 1;
 }
 
+// The loop gives the worker's event loop a turn (the Web Lock's grant, the channel's messages) while idle: with
+// Atomics.waitAsync where there is one, else between short waits, and at least every 50 ms while busy.
 async function loop() {
-  let seen = Atomics.load(ctl, DOORBELL);
+  let seen = Atomics.load(ctl, DOORBELL), turn = Date.now();
+  const waitAsync = typeof Atomics.waitAsync === 'function';
   for (;;) {
     const db = Atomics.load(ctl, DOORBELL);
-    if (db === seen) { Atomics.wait(ctl, DOORBELL, seen, 10000); continue; }
+    if (db === seen) {
+      if (waitAsync) {
+        const r = Atomics.waitAsync(ctl, DOORBELL, seen, 10000);
+        if (r.async) await r.value;
+      } else if (Atomics.wait(ctl, DOORBELL, seen, 20) === 'timed-out') {
+        await new Promise(r => setTimeout(r, 0));
+      }
+      turn = Date.now();
+      continue;
+    }
     seen = db;
+    if (Date.now() - turn > 50) { await new Promise(r => setTimeout(r, 0)); turn = Date.now(); }
     ctl[STATUS] = 0; ctl[R2] = 0;
     try { await serve(); } catch (err) { fail(err); }
     Atomics.store(ctl, DONE, 1);
@@ -295,9 +354,35 @@ self.onmessage = async (ev) => {
     slots = d.slots;
     root = await navigator.storage.getDirectory();
     for (const p of String(d.root).split('/').filter(Boolean)) root = await root.getDirectoryHandle(p, {create: true});
+    tab = String(d.tab);
     const unsafe = await probeUnsafe();
     handleOpts = unsafe ? {mode: 'readwrite-unsafe'} : undefined;
-    self.postMessage({eveOpfsReady: true, mode: unsafe ? 'readwrite-unsafe' : 'readwrite'});
+    const lockName = 'eve:' + String(d.root);
+    channel = new BroadcastChannel(lockName);
+    channel.onmessage = (m) => {
+      const v = m.data;
+      if (v && v.eveOwner && v.term > Atomics.load(ctl, SEEN_TERM)) {
+        Atomics.store(ctl, SEEN_TERM, v.term);
+        self.postMessage({eveOpfsOwner: v.eveOwner, term: v.term});
+      }
+    };
+    const owner = await new Promise((resolve) => {
+      navigator.locks.request(lockName, {ifAvailable: true}, (lock) => {
+        resolve(lock !== null);
+        return lock === null ? undefined : new Promise(() => {});   // held while this worker lives
+      }).catch(() => resolve(false));
+    });
+    if (owner) await takeOver();
+    else {
+      // the term the owner took (read, not locked: the owner's handle on it is closed)
+      try {
+        const t = new Uint32Array(await (await (await root.getFileHandle('.eve-term')).getFile()).arrayBuffer());
+        if (t.length > 0 && t[0] > Atomics.load(ctl, SEEN_TERM)) Atomics.store(ctl, SEEN_TERM, t[0]);
+      } catch (err) { if (!notFound(err)) throw err; }
+      navigator.locks.request(lockName, () => takeOver().then(() => new Promise(() => {})));
+    }
+    self.postMessage({eveOpfsReady: true, mode: unsafe ? 'readwrite-unsafe' : 'readwrite',
+                      role: owner ? 'owner' : 'follower', term: Atomics.load(ctl, owner ? TERM : SEEN_TERM)});
   } catch (err) {
     self.postMessage({eveOpfsReady: false, error: String(err && err.stack || err)});
     return;

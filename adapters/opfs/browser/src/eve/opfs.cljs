@@ -30,6 +30,9 @@
 (def ^:private R2 7)
 (def ^:private NARGS 8)
 (def ^:private NSTR 9)
+(def ^:private ROLE 10)
+(def ^:private TERM 11)
+(def ^:private SEEN-TERM 12)
 (def ARGS
   "The request block's first arg word (its header words precede it): eve.opfs.mount sizes the block by it."
   16)
@@ -115,12 +118,48 @@
         (when (zero? (js/Atomics.load ctl DONE))
           (js/Atomics.wait ctl DONE 0 1000)
           (recur)))
-      (if (zero? (aget ctl STATUS))
-        [(aget ctl R0) (aget ctl R1) (aget ctl R2)]
-        (let [n (aget ctl NSTR)]
-          (throw (ex-info (str "eve.opfs: " (.decode decoder (.slice bytes sbase (+ sbase n))))
-                          {:op op :strs (vec strs)}))))
+      (let [status (aget ctl STATUS)]
+        (if (zero? status)
+          [(aget ctl R0) (aget ctl R1) (aget ctl R2)]
+          (let [n (aget ctl NSTR)]
+            (throw (ex-info (str "eve.opfs: " (.decode decoder (.slice bytes sbase (+ sbase n))))
+                            (cond-> {:op op :strs (vec strs)}
+                              (= 2 status) (assoc ::not-owner true)))))))
       (finally (unlock! ctl)))))
+
+;; Ownership (W7): one tab owns a root's files (eve/opfs_io.js holds the Web Lock); a follower tab's requests throw
+;; (ex-data ::not-owner) until the owner's tab goes and this tab's io worker takes over
+(defn- ctl-word [i]
+  (when-let [^js p (pool-of)] (js/Atomics.load (js/Int32Array. (.-ctl p)) i)))
+
+(defn owner?
+  "true when this tab owns the files (its io worker holds the root's Web Lock)."
+  []
+  (= 1 (ctl-word ROLE)))
+
+(defn term
+  "The term this tab owns the files in (it goes up at each takeover), or the latest owner's term a follower has
+   heard of (0 before any); nil with no pool."
+  []
+  (if (owner?) (ctl-word TERM) (ctl-word SEEN-TERM)))
+
+(defn not-owner?
+  "true when e is a request a follower tab's io worker refused."
+  [e]
+  (true? (::not-owner (ex-data e))))
+
+(defn await-owner!
+  "Block (a worker's call) until this tab owns the files or ms pass; true when it does: a follower's workers wait here
+   for the takeover, then open their domains (a domain's fresh root is recovered: eve.atom)."
+  [ms]
+  (let [^js ctl (js/Int32Array. (.-ctl ^js (the-pool)))
+        deadline (+ (js/Date.now) ms)]
+    (loop []
+      (let [role (js/Atomics.load ctl ROLE)
+            left (- deadline (js/Date.now))]
+        (cond (= 1 role) true
+              (not (pos? left)) false
+              :else (do (js/Atomics.wait ctl ROLE role (min left 1000)) (recur)))))))
 
 ;; The store a region syncs through: a request per batch of runs the block holds
 (deftype IoStore []

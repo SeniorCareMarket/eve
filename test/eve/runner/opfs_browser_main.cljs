@@ -4,6 +4,7 @@
    conformance page does; the result is POSTed to /result (a mount that fails is the result)."
   (:require [cljs.test :as t]
             [eve.opfs.mount :as mount]
+            [eve.runner.opfs-tabs :as tabs]
             [eve.thread-host :as h]
             [eve.opfs-browser-test]
             [eve.region-opfs-test]))
@@ -54,16 +55,25 @@
                  (cond
                    (and (map? m) (= :suite (:op m)))
                    (do (js/clearInterval @timer)
-                       (post! (assoc m :main rows :ms (- (js/Date.now) t0) :driving (h/driving) :opfs-mode mode)))
+                       (-> (tabs/takeover!)
+                           (.then (fn [tk]
+                                    (post! (assoc m :main (assoc rows :takeover (:ok tk)) :takeover (:steps tk)
+                                                  :ms (- (js/Date.now) t0) :driving (h/driving) :opfs-mode mode))))))
                    (and (map? m) (= w (:eve.thread/exit m)))
                    (do (js/clearInterval @timer)
                        (post! {:op :died :notice m :main rows})))))
              20))))
 
+(defn- start-page! []
+  (let [rows (main-rows)
+        t0 (js/Date.now)]
+    (-> (mount/mount! {:root "eve-opfs-test"})
+        (.then (fn [p] (start! (assoc rows :mounted (some? p)) t0 (.-mode p)))
+               (fn [e] (post! {:op :mount-failed :message (str e) :main (assoc rows :mounted false)}))))))
+
 (defn init []
   (when-not (h/run-thread!)
-    (let [rows (main-rows)
-          t0 (js/Date.now)]
-      (-> (mount/mount! {:root "eve-opfs-test"})
-          (.then (fn [p] (start! (assoc rows :mounted (some? p)) t0 (.-mode p)))
-                 (fn [e] (post! {:op :mount-failed :message (str e) :main (assoc rows :mounted false)})))))))
+    (let [q (js/URLSearchParams. (.-search js/location))]
+      (if-let [tab (.get q "tab")]
+        (tabs/tab! tab (.get q "root"))
+        (start-page!)))))
