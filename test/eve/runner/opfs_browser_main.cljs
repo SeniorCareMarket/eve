@@ -3,7 +3,7 @@
    the OPFS pool (eve.opfs.mount/mount!) before its threads start, then runs the suite in a worker, as the thread
    conformance page does; the result is POSTed to /result (a mount that fails is the result)."
   (:require [cljs.test :as t]
-            [eve.opfs.mount :as mount]
+            [eve.opfs.boot :as boot]
             [eve.runner.opfs-tabs :as tabs]
             [eve.thread-host :as h]
             [eve.opfs-browser-test]
@@ -45,7 +45,7 @@
 (defn- post! [result]
   (js/fetch "/result" #js {:method "POST" :body (pr-str result)}))
 
-(defn- start! [rows t0 mode]
+(defn- start! [rows t0 mode by]
   (let [[w] (h/start-threads! 1 'eve.runner.opfs-browser-main/run-suite {:reply (h/self)} {})
         timer (atom nil)]
     (reset! timer
@@ -58,18 +58,22 @@
                        (-> (tabs/takeover!)
                            (.then (fn [tk]
                                     (post! (assoc m :main (assoc rows :takeover (:ok tk)) :takeover (:steps tk)
-                                                  :ms (- (js/Date.now) t0) :driving (h/driving) :opfs-mode mode))))))
+                                                  :ms (- (js/Date.now) t0) :driving (h/driving) :opfs-mode mode :isolated-by by))))))
                    (and (map? m) (= w (:eve.thread/exit m)))
                    (do (js/clearInterval @timer)
                        (post! {:op :died :notice m :main rows})))))
              20))))
 
-(defn- start-page! []
-  (let [rows (main-rows)
-        t0 (js/Date.now)]
-    (-> (mount/mount! {:root "eve-opfs-test"})
-        (.then (fn [p] (start! (assoc rows :mounted (some? p)) t0 (.-mode p)))
-               (fn [e] (post! {:op :mount-failed :message (str e) :main (assoc rows :mounted false)}))))))
+(defn- start-page!
+  "The page boots as a program would (eve.opfs.boot/boot!): isolated (served so, or by eve-sw.js after one reload),
+   the pool mounted, then the suite's worker. :isolated-by says which."
+  []
+  (let [t0 (js/Date.now)
+        by (if (.getItem js/sessionStorage "eve.opfs/coi-reload") :sw :headers)]
+    (-> (boot/boot! {:opfs {:root "eve-opfs-test"}})
+        (.then (fn [{:keys [pool]}]
+                 (start! (assoc (main-rows) :mounted (some? pool)) t0 (.-mode ^js pool) by))
+               (fn [e] (post! {:op :mount-failed :message (str e) :main {:mounted false}}))))))
 
 (defn init []
   (when-not (h/run-thread!)

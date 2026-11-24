@@ -52,6 +52,9 @@
   ;; the demo's third-party scripts (unmodified, licences beside them), loaded by its main worker
   (fs/copy-tree (str eve "/adapters/dom/browser/demo/public") public {:replace-existing true}))
 
+;; the OPFS page boots through eve's service worker (eve.opfs.boot: it isolates a page served without COOP/COEP)
+(when opfs? (fs/copy (str eve "/adapters/sw/browser/eve-sw.js") (str public "/eve-sw.js") {:replace-existing true}))
+
 (step (str "building the page (shadow-cljs release " build ", :simple)"))
 (let [r (p/shell {:dir eve :continue true :out :string :err :string}
                  "clojure" aliases "-m" "shadow.cljs.devtools.cli" "release" build)]

@@ -18,12 +18,13 @@
   0)
 
 ;; A 4-byte SAB for Atomics.wait
-(def ^:private sleep-i32 (js/Int32Array. (js/SharedArrayBuffer. 4)))
+;; made on first sleep: a page that is not yet cross-origin isolated has no SharedArrayBuffer at load
+(def ^:private sleep-i32 (delay (js/Int32Array. (js/SharedArrayBuffer. 4))))
 
 (defn sleep-ms!
   "Block this thread for about ms milliseconds (a worker: the page's main thread cannot block)."
   [ms]
-  (js/Atomics.wait sleep-i32 0 0 ms))
+  (js/Atomics.wait @sleep-i32 0 0 ms))
 
 (defn start-timer!
   "Call f every period-ms until stop-timer!. Returns the host's handle (a browser's interval is a number: it never
