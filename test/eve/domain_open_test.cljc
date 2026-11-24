@@ -14,7 +14,8 @@
             [eve.mem :as mem]
             [eve.region :as region]
             [eve.deftype-proto.alloc :as alloc]
-            [eve.deftype-proto.data :as d]))
+            [eve.deftype-proto.data :as d]
+            #?@(:glj [[eve.thread :as et]])))
 
 (def ^:private scratch-bases (atom []))
 
@@ -141,11 +142,43 @@
                       m))
                   start
                   script)))
+      ;; glojure has real threads (goroutine ids via eve.process/thread-id,
+      ;; blocking eve.thread/promise and future — measured: eve.thread-test
+      ;; promise/deliver and future deref are green on glj). It has no
+      ;; java.util.concurrent.CountDownLatch (or java.lang.Thread), so the
+      ;; :default arm cannot run as written. The same two-thread pin-table
+      ;; script uses eve.thread's primitives (e41cbd03's skip was the wrong
+      ;; fix: a missing Java class is not a missing blocking primitive).
       #?(:cljs nil
          :clje nil
          :lpy nil
          :cljr nil
-         :glj nil
+         :glj
+         (let [before (:pins (live))
+               ready (et/promise)
+               hold (et/promise)
+               start (et/promise)
+               other-tid (clojure.core/atom nil)
+               t (et/future
+                   (et/deref start)
+                   (reset! other-tid (proc/thread-id))
+                   (#'a/pin-epoch! ds 9)
+                   (et/deliver ready true)
+                   (et/deref hold)
+                   (#'a/unpin-epoch! ds))]
+           (#'a/pin-epoch! ds 20)
+           (let [m (portable-pin-step before tid :pin 20)]
+             (is (= {:pins m :published (portable-published m)} (live)))
+             (et/deliver start true)
+             (et/deref ready)
+             (let [m2 (portable-pin-step m @other-tid :pin 9)]
+               (is (= {:pins m2 :published (portable-published m2)} (live))
+                   "the slot publishes the min of the threads (and any views)")
+               (et/deliver hold true)
+               (et/deref t)
+               (is (= {:pins m :published (portable-published m)} (live))))
+             (#'a/unpin-epoch! ds)
+             (is (= {:pins before :published (portable-published before)} (live)))))
          :default
          (let [before (:pins (live))
                ready (java.util.concurrent.CountDownLatch. 1)
