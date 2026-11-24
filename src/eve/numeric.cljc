@@ -544,7 +544,7 @@
 ;; :clj, so an unarmed :clj skip would catch it; :cljs/:clj/:lpy skip —
 ;; cljs keeps its fork above (it cannot require eve.deftype-proto.macros:
 ;; the JS codec closes a load cycle through eve.deftype.registry), the
-;; JVM family and basilisp use their host types; :clje and any other
+;; JVM family, ClojureCLR and basilisp use their host types; :clje and any other
 ;; wrapping host take :default. The :jank and :default texts are
 ;; byte-identical — reader conditionals have no OR; the :jank arm exists
 ;; only to beat the :clj skip.
@@ -599,6 +599,7 @@
    :cljs nil
    :clj nil
    :lpy nil
+   :cljr nil
    :default
    (do
      (host-deftype EveRatio [num den]

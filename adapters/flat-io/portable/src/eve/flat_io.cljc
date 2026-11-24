@@ -8,7 +8,7 @@
    unsigned LEB128 varint, the growable children-first writer (IBuf and its
    Buf deftypes) and the helpers those need, with every host arm they had:
    :clj (the JVM and jolt; bb, glojure and jank read it too, their own arms
-   inside), :bb, :glj, :jank, :cljs, :lpy and :lg. So every host writes and reads exactly
+   inside), :bb, :glj, :jank, :cljs, :lpy, :lg, :clje and :cljr. So every host writes and reads exactly
    the bytes it did before the seam. Added for the contract: varint-v /
    varint-next (the varint without its vector), utf8, bytes=, bytes-cmp,
    key-cmp (eve's key-byte order, in place), the chunk constructors, buf-chunk
@@ -20,9 +20,11 @@
    assumes that — it reaches the bytes through chunk-bytes — so a fast root
    may carry more (a DataView, a VS leaf). All offsets are absolute from the
    chunk's start; all multi-byte reads little-endian (FORMAT-V1 §2)."
-  (:refer-clojure :exclude [chunk])
+  (:refer-clojure :exclude [chunk tuple])
   (:require [eve.encoding :as enc]
-            #?(:jolt [jolt.scheme :as scheme]))
+            #?(:jolt [jolt.scheme :as scheme])
+            #?(:clje [eve.host :refer [aget aset alength byte-array
+                                       unchecked-byte unsigned-bit-shift-right long]]))
   #?(:lpy (:import array)))
 
 #?(:clj (set! *warn-on-reflection* true))
@@ -292,6 +294,122 @@
 #?(:cljs (defn chunk-len "The byte length of chunk c." [c] (.-length c)))
 #?(:cljs (defn utf8 "The string of the n utf-8 bytes at off." [c off n]
   (.decode utf8-decoder (.subarray c off (+ off n)))))
+
+#?(:clje (do
+;; Clojerl does not read :clj (its *features* include :clje only), and
+;; clojure.core has no aget / aset / alength / byte-array / long — those
+;; live on eve.host, referred above. Reads follow the basilisp arm's
+;; shape over eve.host byte arrays; float widths go through eve.encoding
+;; (no Float/Double here). Clojerl has no set! on deftype fields and no
+;; vreset! of a core volatile, so the writer (below) keeps the same
+;; method surface with atoms.
+           (defn u8 [c i] (bit-and (aget c i) 0xFF))
+           (defn u16 [c i] (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8)))
+           (defn u32 [c i] (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16)))
+           (defn i32 [c i] (let [v (u32 c i)] (if (>= v 0x80000000) (- v 0x100000000) v)))
+           (defn i64 [c i]
+             (let [v (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32))]
+               (if (>= v 0x8000000000000000) (- v 0x10000000000000000) v)))
+           (defn f64 [c i] (enc/read-f64-le c i))
+           (defn f32 [c i] (enc/read-f32-le c i))
+
+           (defn varint
+             "[value next-pos] — unsigned LEB128."
+             [c i]
+             (loop [i i sh 0 v 0]
+               (let [x (u8 c i)]
+                 (if (< x 128) [(bit-or v (bit-shift-left x sh)) (inc i)]
+                     (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+
+           (defn varint-v
+             "The unsigned LEB128 value at i (varint's first element, no vector)."
+             [c i]
+             (loop [i i sh 0 v 0]
+               (let [x (u8 c i)]
+                 (if (< x 128) (bit-or v (bit-shift-left x sh))
+                     (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+
+           (defn varint-next
+             "The position after the unsigned LEB128 at i (varint's second element)."
+             [c i]
+             (loop [i i] (if (< (u8 c i) 128) (inc i) (recur (inc i)))))
+
+           (defn varint-len [v]
+             (loop [v v n 1] (if (< v 128) n (recur (bit-shift-right v 7) (inc n)))))
+
+           (defn- hb
+             "Byte i of host byte array bs, unsigned (the in-place compares' other side)."
+             [bs i]
+             (bit-and (aget bs i) 0xFF))
+
+           (defn- ba-copy-of
+             "java.util.Arrays/copyOf's semantics (zero-padded grow, truncating shrink)."
+             [b n]
+             (let [nb (byte-array n)]
+               (enc/arraycopy b 0 nb 0 (min (alength b) n))
+               nb))
+
+           (defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
+           (defn chunk-bytes "The host byte array of chunk c." [c] c)
+           (defn chunk-len "The byte length of chunk c." [c] (alength c))
+           (defn utf8 "The string of the n utf-8 bytes at off." [c off n] (enc/utf8-string c off n))))
+
+#?(:cljr (do
+;; ClojureCLR's reader takes :cljr, not :clj, so the :clj reads never
+;; reach it (the same :default trap as :lg / :lpy). Reads follow the
+;; basilisp arm's shape over CLR byte arrays: aget already answers an
+;; unsigned byte (0xFF reads 255, measured), and 64-bit bit ops wrap
+;; like the JVM's, so i64 is the plain composition while i32 still
+;; needs the sign conversion (a u32 fits an Int64 positive). The float
+;; widths go through eve.encoding (no Float/Double here).
+           (defn u8 [c i] (bit-and (aget c i) 0xFF))
+           (defn u16 [c i] (bit-or (u8 c i) (bit-shift-left (u8 c (inc i)) 8)))
+           (defn u32 [c i] (bit-or (u16 c i) (bit-shift-left (u16 c (+ i 2)) 16)))
+           (defn i32 [c i] (let [v (u32 c i)] (if (>= v 0x80000000) (- v 0x100000000) v)))
+           (defn i64 [c i] (bit-or (u32 c i) (bit-shift-left (u32 c (+ i 4)) 32)))
+           (defn f64 [c i] (enc/read-f64-le c i))
+           (defn f32 [c i] (enc/read-f32-le c i))
+
+           (defn varint
+             "[value next-pos] — unsigned LEB128."
+             [c i]
+             (loop [i i sh 0 v 0]
+               (let [x (u8 c i)]
+                 (if (< x 128) [(bit-or v (bit-shift-left x sh)) (inc i)]
+                     (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+
+           (defn varint-v
+             "The unsigned LEB128 value at i (varint's first element, no vector)."
+             [c i]
+             (loop [i i sh 0 v 0]
+               (let [x (u8 c i)]
+                 (if (< x 128) (bit-or v (bit-shift-left x sh))
+                     (recur (inc i) (+ sh 7) (bit-or v (bit-shift-left (bit-and x 127) sh)))))))
+
+           (defn varint-next
+             "The position after the unsigned LEB128 at i (varint's second element)."
+             [c i]
+             (loop [i i] (if (< (u8 c i) 128) (inc i) (recur (inc i)))))
+
+           (defn varint-len [v]
+             (loop [v v n 1] (if (< v 128) n (recur (unsigned-bit-shift-right v 7) (inc n)))))
+
+           (defn- hb
+             "Byte i of host byte array bs, unsigned (the in-place compares' other side)."
+             [bs i]
+             (bit-and (aget bs i) 0xFF))
+
+           (defn- ba-copy-of
+             "java.util.Arrays/copyOf's semantics (zero-padded grow, truncating shrink)."
+             [b n]
+             (let [nb (byte-array n)]
+               (enc/arraycopy b 0 nb 0 (min (alength b) n))
+               nb))
+
+           (defn chunk "The chunk over host byte array bs: bs itself." [bs] bs)
+           (defn chunk-bytes "The host byte array of chunk c." [c] c)
+           (defn chunk-len "The byte length of chunk c." [c] (alength c))
+           (defn utf8 "The string of the n utf-8 bytes at off." [c off n] (enc/utf8-string c off n))))
 
 ;; ---------------------------------------------------------------------------
 ;; in place: compares over the stored bytes, no copy of them
@@ -592,6 +710,94 @@
   "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
   [width]
   (Buf. (volatile! (byte-array 256)) (volatile! 0) width))))
+
+;; Same reason as the :lpy writer: Clojerl does not read :clj, so IBuf,
+;; Buf and buf would not exist and no chunk could be built. The method
+;; surface and byte layout are the shared text's. Clojerl's deftype has
+;; no set! / volatile! field mutation (set! cannot resolve a field var),
+;; so the two mutable fields are atoms and every method works through
+;; reset! / deref.
+;; clojerl's defprotocol inside a do fails ("Could not dereference
+;; ... no Erlang function to back it up", eve.host.clje); IBuf is at
+;; top level, Buf and buf in the do below.
+#?(:clje (defprotocol IBuf
+           (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
+           (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
+           (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v])))
+
+#?(:clje (do
+           (deftype Buf [b p width]
+             IBuf
+             (wRaw [_] @b)
+             (wPos [_] @p)
+             (wSeek [_ np] (reset! p np))
+             (wU8 [_ v] (when (>= @p (alength @b)) (reset! b (ba-copy-of @b (* 2 (alength @b)))))
+               (aset @b @p (unchecked-byte v)) (reset! p (inc @p)))
+             (wU16 [this v] (buf-u8 this v) (buf-u8 this (bit-shift-right v 8)))
+             (wU32 [this v] (buf-u16 this v) (buf-u16 this (bit-shift-right v 16)))
+             (wI64 [this v] (buf-u32 this v) (buf-u32 this (bit-shift-right v 32)))
+             (wF64 [this v] (buf-i64 this (enc/double->long-bits v)))
+             (wVarint [this v]
+               (loop [v v]
+                 (if (< v 128) (buf-u8 this v)
+                     (do (buf-u8 this (bit-or (bit-and v 127) 128)) (recur (unsigned-bit-shift-right v 7))))))
+             (wBytes [_ src off n]
+               (when (> (+ @p n) (alength @b)) (reset! b (ba-copy-of @b (max (+ @p n) (* 2 (alength @b))))))
+               (enc/arraycopy src off @b @p n) (reset! p (+ @p n)))
+             (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
+             (wPatchU32 [_ at v]
+               (aset @b at (unchecked-byte v))
+               (aset @b (+ at 1) (unchecked-byte (bit-shift-right v 8)))
+               (aset @b (+ at 2) (unchecked-byte (bit-shift-right v 16)))
+               (aset @b (+ at 3) (unchecked-byte (bit-shift-right v 24)))))
+
+           (defn buf
+             "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
+             [width]
+             (Buf. (atom (byte-array 256)) (atom 0) width))))
+
+#?(:cljr (do
+;; Same reason as the :lpy / :lg writers: ClojureCLR does not read :clj,
+;; so IBuf, Buf and buf would not exist and no chunk could be built.
+;; CLR has volatile! and vreset!, so the writer is the glojure / let-go
+;; realization — the two mutable fields hold volatiles from construction
+;; and every method works through them. The method surface and byte
+;; layout are the shared text's, unchanged. The float width goes through
+;; eve.encoding (no Float/Double here).
+           (defprotocol IBuf
+             (wRaw [_]) (wPos [_]) (wSeek [_ p]) (wU8 [_ v]) (wU16 [_ v])
+             (wU32 [_ v]) (wI64 [_ v]) (wF64 [_ v]) (wVarint [_ v])
+             (wBytes [_ src off n]) (wOff [_ v]) (wPatchU32 [_ at v]))
+
+           (deftype Buf [b p width]
+             IBuf
+             (wRaw [_] @b)
+             (wPos [_] @p)
+             (wSeek [_ np] (vreset! p np))
+             (wU8 [_ v] (when (>= @p (alength @b)) (vreset! b (ba-copy-of @b (* 2 (alength @b)))))
+               (aset @b (int @p) (unchecked-byte v)) (vreset! p (inc @p)))
+             (wU16 [this v] (buf-u8 this v) (buf-u8 this (bit-shift-right v 8)))
+             (wU32 [this v] (buf-u16 this v) (buf-u16 this (bit-shift-right v 16)))
+             (wI64 [this v] (buf-u32 this v) (buf-u32 this (bit-shift-right v 32)))
+             (wF64 [this v] (buf-i64 this (enc/double->long-bits v)))
+             (wVarint [this v]
+               (loop [v v]
+                 (if (< v 128) (buf-u8 this v)
+                     (do (buf-u8 this (bit-or (bit-and v 127) 128)) (recur (unsigned-bit-shift-right v 7))))))
+             (wBytes [_ src off n]
+               (when (> (+ @p n) (alength @b)) (vreset! b (ba-copy-of @b (max (+ @p n) (* 2 (alength @b))))))
+               (enc/arraycopy src off @b @p n) (vreset! p (+ @p n)))
+             (wOff [this v] (if (== width 2) (buf-u16 this v) (buf-u32 this v)))
+             (wPatchU32 [_ at v]
+               (aset @b (int at) (unchecked-byte v))
+               (aset @b (int (+ at 1)) (unchecked-byte (bit-shift-right v 8)))
+               (aset @b (int (+ at 2)) (unchecked-byte (bit-shift-right v 16)))
+               (aset @b (int (+ at 3)) (unchecked-byte (bit-shift-right v 24)))))
+
+           (defn buf
+             "A growable writer whose offsets (buf-off) are width bytes, 2 or 4."
+             [width]
+             (Buf. (volatile! (byte-array 256)) (volatile! 0) width))))
 
 ;; The writer's buffer on ClojureScript: the same method surface the
 ;; shared writer calls, over a growable Uint8Array + DataView. The

@@ -37,9 +37,14 @@
 
 (defn- ch "A chunk over bv." [bv] (fio/chunk (hb bv)))
 
+(def ^:private hex-digit
+  {\0 0 \1 1 \2 2 \3 3 \4 4 \5 5 \6 6 \7 7 \8 8 \9 9
+   \a 10 \b 11 \c 12 \d 13 \e 14 \f 15
+   \A 10 \B 11 \C 12 \D 13 \E 14 \F 15})
+
 (defn- hex->bv [s]
-  (mapv (fn [i] #?(:cljs (js/parseInt (subs s (* 2 i) (+ 2 (* 2 i))) 16)
-                   :default (Long/parseLong (subs s (* 2 i) (+ 2 (* 2 i))) 16)))
+  (mapv (fn [i] (+ (* 16 (hex-digit (nth s (* 2 i))))
+                   (hex-digit (nth s (inc (* 2 i))))))
         (range (quot (count s) 2))))
 
 (defn- bv-of
@@ -61,6 +66,10 @@
   (let [lo (ref-u32 bv i) hi (ref-u32 bv (+ i 4))]
     #?(:cljs (let [v (+ (js/BigInt lo) (* (js/BigInt hi) (js/BigInt 4294967296)))]
                (str (if (>= hi 2147483648) (- v (js/BigInt "18446744073709551616")) v)))
+       ;; Clojerl has no +' / *' / -' and no N suffix; its integers are already
+       ;; unbounded, so the same exact value is written with + / * / -.
+       :clje (let [v (+ lo (* hi 4294967296))]
+               (str (if (>= hi 2147483648) (- v 18446744073709551616) v)))
        :default (let [v (+' lo (*' hi 4294967296))]
                   (str (if (>= hi 2147483648) (-' v 18446744073709551616N) v))))))
 (defn- ref-varint
@@ -78,7 +87,7 @@
 (defn- negative-zero?
   "x is -0.0. (Not (neg? (/ 1.0 x)): a boxed division by zero throws on the JVM-class hosts — bb boxes every number.)"
   [x]
-  (and (zero? x) #?(:cljs (neg? (/ 1 x)) :default (neg? (Math/copySign 1.0 (double x))))))
+  (and (zero? x) #?(:cljs (neg? (/ 1 x)) :default (neg? (enc/double->long-bits x)))))
 
 (defn- read-fixtures []
   (let [path "test/eve/fixtures/flat-bytes.edn"]
@@ -184,18 +193,25 @@
     (is (== 1.5 (fio/f64 (ch [0 0 0 0 0 0 0xF8 0x3F]) 0)))
     (let [z (fio/f64 (ch [0 0 0 0 0 0 0 0x80]) 0)]
       (is (negative-zero? z) "-0.0 keeps its sign"))
-    (let [n (fio/f64 (ch [0 0 0 0 0 0 0xF8 0x7F]) 0)]
-      (is (not (== n n)) "NaN"))
+    #?(:clje nil
+       :default (let [n (fio/f64 (ch [0 0 0 0 0 0 0xF8 0x7F]) 0)]
+                  (is (not (== n n)) "NaN")))
     (is (== 0.1 (fio/f64 (ch [0x9A 0x99 0x99 0x99 0x99 0x99 0xB9 0x3F]) 0)))
-    (is (== ##Inf (fio/f64 (ch [0 0 0 0 0 0 0xF0 0x7F]) 0))))
+    ;; ##Inf is a reader syntax clojerl lacks, and the BEAM has no infinity
+    ;; (bits-double is badarg). Arithmetic, not the tag, so every host can
+    ;; read this file; the assertion itself is skipped on :clje.
+    #?(:clje nil
+       :default (is (== (* 1.7976931348623157e308 2.0)
+                        (fio/f64 (ch [0 0 0 0 0 0 0xF0 0x7F]) 0)))))
   (testing "f32, widened exactly"
     (is (== 1.5 (fio/f32 (ch [0 0 0xC0 0x3F]) 0)))
     (is (== -2.25 (fio/f32 (ch [0 0 0x10 0xC0]) 0)))
     (is (== 0.10000000149011612 (fio/f32 (ch [0xCD 0xCC 0xCC 0x3D]) 0)) "0.1f, exactly")
     (let [z (fio/f32 (ch [0 0 0 0x80]) 0)]
       (is (negative-zero? z) "-0.0 keeps its sign"))
-    (let [n (fio/f32 (ch [0 0 0xC0 0x7F]) 0)]
-      (is (not (== n n)) "NaN"))))
+    #?(:clje nil
+       :default (let [n (fio/f32 (ch [0 0 0xC0 0x7F]) 0)]
+                  (is (not (== n n)) "NaN")))))
 
 ;; ---------------------------------------------------------------------------
 ;; in place
@@ -239,8 +255,9 @@
             c (ch (into [0x05 0xFF] sbv))
             want (signum (d/compare-bytes (codec/encode-key stored) (codec/encode-key k)))]
         (is (= want (fio/key-cmp c 2 n k))
-            (str "key-cmp " (count stored) " chars vs " (count k) " chars: " (subs stored 0 (min 12 (count stored)))
-                 " / " (subs k 0 (min 12 (count k)))))))
+            ;; no subs: Clojerl's substring is byte-based and :badarg on a
+            ;; mid-code-point cut of e.g. "😀" (count 1).
+            (str "key-cmp " (count stored) " chars vs " (count k) " chars"))))
     (testing "the answers the order implies, spelled out"
       (let [kc (fn [stored k] (let [bv (host-bv (enc/utf8-bytes stored))] (fio/key-cmp (ch bv) 0 (count bv) k)))]
         (is (= 0 (kc "abc" "abc")))
@@ -307,12 +324,19 @@
     (let [w (fio/buf 2)]
       (fio/buf-i64 w big-i64)
       (fio/buf-f64 w 1.5)
-      (fio/buf-f64 w ##NaN)
-      (let [bv (written w)]
+      ;; ##NaN is a reader syntax clojerl lacks, and the BEAM has no NaN
+      ;; (bits-double is badarg). The write + read-back is the other hosts'.
+      #?(:clje nil
+         :default (fio/buf-f64 w (- (* 1.7976931348623157e308 2.0)
+                                    (* 1.7976931348623157e308 2.0))))
+      (let [bv (written w)
+            n-bytes #?(:clje 16 :default 24)]
         (is (= [0x01 0 0 0 0 0 0x20 0] (subvec bv 0 8)))
         (is (= [0 0 0 0 0 0 0xF8 0x3F] (subvec bv 8 16)))
-        (is (= "9007199254740993" (str (fio/i64 (fio/buf-chunk w 24) 0))) "it reads back")
-        (let [n (fio/f64 (fio/buf-chunk w 24) 16)] (is (not (== n n)) "NaN reads back NaN")))))
+        (is (= "9007199254740993" (str (fio/i64 (fio/buf-chunk w n-bytes) 0))) "it reads back")
+        #?(:clje nil
+           :default (let [n (fio/f64 (fio/buf-chunk w 24) 16)]
+                      (is (not (== n n)) "NaN reads back NaN"))))))
   (testing "varints of 1, 2 and 3 bytes, written as varint reads them"
     (let [w (fio/buf 2)]
       (doseq [v [0 127 128 16383 16384 2097151]] (fio/buf-varint w v))
@@ -329,7 +353,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- elems "A tuple's elements, i64 / u64 as decimals and f32 as doubles." [t kind]
-  (mapv (fn [x] (case (int kind) (10 11) (str x) 8 (double x) x)) t))
+  (mapv (fn [x] (case kind (10 11) (str x) 8 #?(:clje x :default (double x)) x)) t))
 
 (deftest tuples-of-every-dense-kind
   (let [rows [[1 [0x00 0x7F 0x80 0xFF] [0 127 128 255]]

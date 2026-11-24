@@ -62,10 +62,10 @@ runner's own line is the measurement.)
 | `disk-swap-counter` | — | — | — |
 | `thread-submit-64` | — | — | — |
 
-Failed: `clojerl … -m eve.runner.clje-main perf` exits 1 at compile — `adapters/flat-io/portable/src/eve/flat_io.cljc:304:13: Unable to resolve symbol: long`. The same error on a direct retry at 21:09 ET. Previous numbers are not carried forward.
+Failed: the portable flat-io `:clje` arm landed; `eve.flat-io-conformance-test` is 11 tests / 260 assertions, 0 failures, 0 errors (2026-11-24 12:07 AM ET; Inf/NaN rows skipped — the BEAM has neither). Official `bb test:clje` and `clojerl … -m eve.runner.clje-main perf` still die at compile in `eve.flat.chunk:103` (`long` is unresolved; Clojerl's core does not bind it). Previous numbers are not carried forward.
 <!-- /perf:clje -->
 
-The table above has no numbers at this pin (compile fails; see the note on the table). The paragraph below describes the 2026-10-21 release-box table, kept as qualitative context only.
+The table above has no numbers at this pin (`eve.flat.chunk` still does not compile on clojerl; see the note on the table). The paragraph below describes the 2026-10-21 release-box table, kept as qualitative context only.
 
 Reading it: ~25–30× the JVM's on swaps (each slab access a NIF call), and encoding a 1,000-element vector is its
 outlier (457 ms — ~1,240× its counter swap, where the other hosts sit at 100–390×): the codec's per-element array

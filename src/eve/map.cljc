@@ -94,7 +94,11 @@
 ;; value-indexed array (host number, 0..4095) is exact and does not use
 ;; Clojure =, which would also treat 1 and 1.0 as one key on some hosts.
 (def ^:private ^:const INT-KEY-MEMO-N 4096)
-(def ^:private ^{:tag "[Ljava.lang.Object;"} int-key-memo (object-array INT-KEY-MEMO-N))
+; the tag is a JVM array class: ClojureCLR's reader is :cljr and
+; cannot resolve [Ljava.lang.Object; (bb test:cljr, 2026-11-23).
+(def ^:private #?(:clj ^{:tag "[Ljava.lang.Object;"} int-key-memo
+                  :default int-key-memo)
+  (object-array INT-KEY-MEMO-N))
 
 #?(:jolt
    (do
@@ -120,10 +124,10 @@
             (enc/cache-put! key-memo k pair KEY-MEMO-MAX)
             pair))
       (if (and (integer? k) (number? k) (not (neg? k)) (< k INT-KEY-MEMO-N))
-        (or (aget ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k))
+        (or (aget #?(:clj ^{:tag "[Ljava.lang.Object;"} int-key-memo :default int-key-memo) (int k))
             (let [kb (serialize-key-bytes k)
                   pair [kb (portable-hash-bytes kb)]]
-              (aset ^{:tag "[Ljava.lang.Object;"} int-key-memo (int k) pair)
+              (aset #?(:clj ^{:tag "[Ljava.lang.Object;"} int-key-memo :default int-key-memo) (int k) pair)
               pair))
         (let [kb (serialize-key-bytes k)]
           [kb (portable-hash-bytes kb)])))))

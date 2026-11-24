@@ -6,7 +6,7 @@ classpath). Eve's shared flat code requires `[eve.flat-io :as fio]` and reaches 
 
 | root | hosts | role |
 |---|---|---|
-| adapters/flat-io/portable/src/eve/flat_io.cljc | every host without a fast one (bb, glojure, jank, ClojureCLR, …) | inbuilt: chunk.cljc's byte layer as it stands, moved (its :clj / :bb / :glj / :jank arms) |
+| adapters/flat-io/portable/src/eve/flat_io.cljc | every host without a fast one (bb, glojure, jank, ClojureCLR, clojerl, …) | inbuilt: chunk.cljc's byte layer as it stands, moved (its :clj / :bb / :glj / :jank / :cljs / :lpy / :lg / :clje / :cljr arms) |
 | adapters/flat-io/jvm/src/eve/flat_io.clj | JVM (and jolt) | fast: byteArrayViewVarHandle little-endian loads, Arrays.mismatch / compareUnsigned, no reflection |
 | adapters/flat-io/js/src/eve/flat_io.cljs | ClojureScript, nbb, the browser | fast: Uint8Array + DataView, TextDecoder, typed-array tuples |
 | adapters/flat-io/vs/src/eve/flat_io.vs | ValueScript | fast: a chunk is a VS string leaf; reads are mmap loads at its payload (vs.core/rt-blob-off); the writer is a leaf written in place (R7's __row-flat); tuples are VS rows |

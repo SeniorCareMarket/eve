@@ -45,10 +45,10 @@ including the network rung. Not run: the four typed-array suites — ClojureCLR 
 | `disk-swap-counter` | — | — | — |
 | `thread-submit-64` | — | — | — |
 
-Not re-run: .NET 8.0.428 and Clojure.Main 1.12.6 are installed (`/workspace/tools/dotnet`, `cljr` on PATH), but `bb test:cljr` dies at compile (`eve/flat_io.cljc:308` cannot resolve `u8`; `:cljr` is not `:clj`, and flat-io has no `:cljr` port of `u8` / `long` / `alength`). The command would have been `CLOJURE_LOAD_PATH=<cp :cljr> DOTNET_ROOT=/workspace/tools/dotnet cljr -m eve.runner.cljr-main perf`. Previous numbers are not carried forward.
+Not re-run: .NET 8.0.428 and Clojure.Main 1.12.6 are installed (`/workspace/tools/dotnet`, `cljr` on PATH). The portable flat-io `:cljr` arm landed; `eve.flat-io-conformance-test` is 11 tests / 264 assertions, 0 failures, 0 errors (2026-11-24 12:04 AM ET). Official `bb test:cljr` and `cljr -m eve.runner.cljr-main perf` still die at compile in `eve.flat.chunk` (`Object/toString` on `MetaVal`; CLR requires `ToString` / `Equals` / `GetHashCode`, and that file has many such sites). Previous numbers are not carried forward.
 <!-- /perf:cljr -->
 
-The table above was not re-run on this box (flat-io has no `:cljr` arm). The paragraph below describes the 2026-10-21 release-box table, kept as qualitative context only.
+The table above was not re-run on this box (`eve.flat.chunk` still does not compile on CLR). The paragraph below describes the 2026-10-21 release-box table, kept as qualitative context only.
 
 Reading it: the fastest host outside the JVM and V8 on swaps (92.1 µs, 33.6 µs for a 1,000-key map's), and faster
 than ClojureScript on encoding a 1,000-element vector (9.1 ms against 11.5 ms). A small deref (89.7 µs) costs as much as
