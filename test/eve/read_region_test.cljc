@@ -14,7 +14,8 @@
             [eve.core :as ec]
             [eve.host :refer [swap!]]
             [eve.process :as proc]
-            [eve.deftype-proto.data :as d]))
+            [eve.deftype-proto.data :as d]
+            [eve.view :as view]))
 
 (defn- fresh
   "An atom of a new in-process domain, holding v."
@@ -54,7 +55,20 @@
     (is (= [{:i 0} {:i 1} {:i 2}] (vec r)))
     (is (every? (fn [x] (not (stored? x))) r))))
 
+(defn- in-read-end-c
+  "The post-region flush assertion asks what is freed with no reader pinned.
+   In read-end :gc (B), swap!/deref answers are views that hold pins until
+   the host GC collects them (same reason as eve.record-test's hidden-payloads,
+   2026-11-24 ET: on glojure (queued) was 22 after the first flush)."
+  [f]
+  #?(:org.babashka/nbb (f) :lpy (f)
+     :default (let [mode (view/read-end-mode)]
+                (view/set-read-end! :commit)
+                (try (f) (finally (view/set-read-end! mode))))))
+
 (deftest what-a-region-read-is-not-freed-while-it-runs
+  (in-read-end-c
+   (fn []
   (let [a (fresh {:xs (vec (range 100))})
         queued (fn [] (count @(:retire-q (atom/-domain-state a))))
         [before after held]
@@ -70,7 +84,7 @@
     (proc/sleep-ms! 60)
     (swap! a (fn [m] (ec/assoc m :n 1)))
     (is (zero? (queued)) "freed at the first flush after the region let go")
-    (is (not (pinned? a)))))
+    (is (not (pinned? a)))))))
 
 (deftest a-region-inside-another-joins-it
   (let [a (fresh {:k {:v 1}})
