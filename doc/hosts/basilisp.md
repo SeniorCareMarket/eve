@@ -61,20 +61,20 @@ round (left out without a reason before; domain open's first create is what expo
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
 | `atom-swap-counter` | 12.2 ms | 128 | 951 |
-| `atom-deref-small` | 10.1 ms | 128 | 3707 |
-| `atom-swap-map-1k` | 3657.0 ms | 1 | 871544 |
-| `atom-deref-map-1k` | 1872.0 ms | 1 | 824306 |
+| `atom-deref-small` | 1.9 ms | 1024 | 644 |
+| `atom-swap-map-1k` | 116.2 ms | 16 | 28326 |
+| `atom-deref-map-1k` | 94.1 ms | 16 | 34352 |
 | `atom-$-get-map-1k` | 619.6 µs | 2048 | 1028 |
 | `atom-reset-vec-1k` | 3845.0 ms | 1 | 3241 |
 | `sorted-set-build-200` | 10934.0 ms | 1 | 2194 |
 | `disk-swap-counter` | 17.2 ms | 64 | 279 |
 | `thread-submit-64` | 125.3 ms | 8 | 41 |
 
-Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
+The `atom-deref-small`, `atom-swap-map-1k`, and `atom-deref-map-1k` cells were re-measured 2026-11-24 8:47–9:45 AM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `80f97a68` (median of five official cells, load1 1.74–6.14). The other rows remain the 2026-11-23 8:53–9:08 PM ET run at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
 <!-- /perf:lpy -->
 
-Reading it: still the slowest host that ran — a counter swap 12.2 ms (~950× the JVM), a 1,000-key map swap 3.66 s (one op
-in the timed round), its deref 1.87 s. `atom-$-get-map-1k` is a relative bright spot at 620 µs. 64 tasks in 125 ms under
+Reading it: still the slowest host that ran — a counter swap 12.2 ms (~950× the JVM), a 1,000-key map swap 116.2 ms (16 ops
+in the timed round), its deref 94.1 ms. A two-key deref is 1.9 ms (1024 ops). `atom-$-get-map-1k` is a relative bright spot at 620 µs. 64 tasks in 125 ms under
 the GIL. What a profile found and an earlier round fixed is in the bullets below; what is left is basilisp's per-call cost
 (a variadic call 3.4 µs, a closure made per call 9.8 µs, against 0.54 µs for an empty call: the final pass's probe).
 

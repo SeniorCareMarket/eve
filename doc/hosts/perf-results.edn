@@ -63,9 +63,9 @@
    :wall-s 171,
    :lines
    [{:ms 1557, :perf :atom-swap-counter, :ns-per-op 12164062, :ops 128}
-    {:ms 1292, :perf :atom-deref-small, :ns-per-op 10093750, :ops 128}
-    {:ms 3657, :perf :atom-swap-map-1k, :ns-per-op 3657000000, :ops 1}
-    {:ms 1872, :perf :atom-deref-map-1k, :ns-per-op 1872000000, :ops 1}
+    {:ms 1917, :perf :atom-deref-small, :ns-per-op 1872070, :ops 1024}
+    {:ms 1860, :perf :atom-swap-map-1k, :ns-per-op 116250000, :ops 16}
+    {:ms 1506, :perf :atom-deref-map-1k, :ns-per-op 94125000, :ops 16}
     {:ms 1269, :perf :atom-$-get-map-1k, :ns-per-op 619628, :ops 2048}
     {:ms 3845, :perf :atom-reset-vec-1k, :ns-per-op 3845000000, :ops 1}
     {:ms 10934,
