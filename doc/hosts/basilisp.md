@@ -60,26 +60,23 @@ round (left out without a reason before; domain open's first create is what expo
 <!-- perf:lpy (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 8.9 ms | 128 | 757 |
-| `atom-deref-small` | 1.3 ms | 1024 | 77 |
-| `atom-swap-map-1k` | 27.0 ms | 64 | 5810 |
-| `atom-deref-map-1k` | 636.0 ms | 2 | 1684 |
-| `atom-$-get-map-1k` | 2.1 ms | 512 | 1040 |
-| `atom-reset-vec-1k` | 1630.0 ms | 1 | 1061 |
-| `sorted-set-build-200` | 9197.0 ms | 1 | 827 |
-| `int-map-build-200` | 2539.0 ms | 1 | 567 |
-| `disk-swap-counter` | 9.6 ms | 128 | 545 |
-| `thread-submit-64` | 280.5 ms | 8 | 285 |
+| `atom-swap-counter` | 12.2 ms | 128 | 951 |
+| `atom-deref-small` | 10.1 ms | 128 | 3707 |
+| `atom-swap-map-1k` | 3657.0 ms | 1 | 871544 |
+| `atom-deref-map-1k` | 1872.0 ms | 1 | 824306 |
+| `atom-$-get-map-1k` | 619.6 µs | 2048 | 1028 |
+| `atom-reset-vec-1k` | 3845.0 ms | 1 | 3241 |
+| `sorted-set-build-200` | 10934.0 ms | 1 | 2194 |
+| `disk-swap-counter` | 17.2 ms | 64 | 279 |
+| `thread-submit-64` | 125.3 ms | 8 | 41 |
 
-Measured 2026-10-22 1:44–1:46 AM ET on the final tree by `bb scripts/perf-all.clj lpy`, alone (the all-host run's
-column, 10:56–11:06 PM, overlapped a short nbb process); a round of at least 1 s.
+Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
 <!-- /perf:lpy -->
 
-Reading it: 550–1,700× the JVM's on most workloads (a counter swap 8.9 ms, a 1,000-key map's deref 636 ms) and
-~5,800× on a swap into a 1,000-key map (27.0 ms), the slowest host on every workload; 64 tasks in 281 ms under the
-GIL. What a profile found and this round fixed is in the bullets below; what
-is left is basilisp's per-call cost (a variadic call 3.4 µs, a closure made per call 9.8 µs, against 0.54 µs for an
-empty call: the final pass's probe).
+Reading it: still the slowest host that ran — a counter swap 12.2 ms (~950× the JVM), a 1,000-key map swap 3.66 s (one op
+in the timed round), its deref 1.87 s. `atom-$-get-map-1k` is a relative bright spot at 620 µs. 64 tasks in 125 ms under
+the GIL. What a profile found and an earlier round fixed is in the bullets below; what is left is basilisp's per-call cost
+(a variadic call 3.4 µs, a closure made per call 9.8 µs, against 0.54 µs for an empty call: the final pass's probe).
 
 basilisp is eve's slowest host — 2.4–8.8× the next slowest on every workload but the thread one (18×) — for reasons
 that are basilisp's:

@@ -39,23 +39,22 @@ namespace babashka's runner runs, jolt's runs.
 <!-- perf:jolt (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 160.8 µs | 8192 | 14 |
-| `atom-deref-small` | 17.2 µs | 65536 | 1.0 |
-| `atom-swap-map-1k` | 47.3 µs | 32768 | 10 |
-| `atom-deref-map-1k` | 4.7 ms | 256 | 12 |
-| `atom-$-get-map-1k` | 25.0 µs | 65536 | 12 |
-| `atom-reset-vec-1k` | 16.5 ms | 64 | 11 |
-| `sorted-set-build-200` | 182.8 ms | 8 | 16 |
-| `int-map-build-200` | 81.4 ms | 16 | 18 |
-| `disk-swap-counter` | 177.9 µs | 8192 | 10 |
-| `thread-submit-64` | 2.2 ms | 512 | 2.2 |
+| `atom-swap-counter` | 15.9 µs | 65536 | 1.2 |
+| `atom-deref-small` | 1.7 µs | 1048576 | 0.61 |
+| `atom-swap-map-1k` | 6.7 µs | 262144 | 1.6 |
+| `atom-deref-map-1k` | 1.6 µs | 1048576 | 0.71 |
+| `atom-$-get-map-1k` | 0.8 µs | 2097152 | 1.3 |
+| `atom-reset-vec-1k` | 3.7 ms | 512 | 3.1 |
+| `sorted-set-build-200` | 10.4 ms | 128 | 2.1 |
+| `disk-swap-counter` | 139.0 µs | 8192 | 2.2 |
+| `thread-submit-64` | 4.5 ms | 256 | 1.5 |
 
-Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
-a time; a round of at least 1 s.
+Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
 <!-- /perf:jolt -->
 
-Reading it: reads near the JVM's (a small deref 17.2 µs), writes ~10–14× (a counter swap 161 µs: every region access is
-a foreign call and a CAS allocates its witness), and real threads (64 tasks in 2.2 ms, Chez threads).
+Reading it: within ~1.2–1.6× of the JVM on in-process swaps (a counter swap 15.9 µs, 1.2×) and faster than the JVM on both
+derefs (a small deref 1.7 µs, 0.61×). `atom-$-get-map-1k` is 0.8 µs (1.3× the JVM's 0.6 µs). 64 tasks in 4.5 ms on Chez
+threads. A disk-domain swap is 139 µs, 2.2× the JVM's, with the journal engaged.
 
 What sets jolt's numbers:
 

@@ -50,25 +50,22 @@ many workers), `fuzz`, `conformance`, `lustre`, `repro`, `slab-leak`, and the be
 <!-- perf:cljs (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 33.2 µs | 32768 | 2.8 |
-| `atom-deref-small` | 8.9 µs | 131072 | 0.52 |
-| `atom-swap-map-1k` | 10.1 µs | 131072 | 2.2 |
-| `atom-deref-map-1k` | 1.7 ms | 1024 | 4.6 |
-| `atom-$-get-map-1k` | 6.4 µs | 262144 | 3.1 |
-| `atom-reset-vec-1k` | 11.5 ms | 128 | 7.5 |
-| `sorted-set-build-200` | 36.4 ms | 32 | 3.3 |
-| `int-map-build-200` | 8.1 ms | 128 | 1.8 |
-| `disk-swap-counter` | 43.7 µs | 32768 | 2.5 |
-| `thread-submit-64` | 7.6 ms | 256 | 7.7 |
+| `atom-swap-counter` | 41.6 µs | 32768 | 3.3 |
+| `atom-deref-small` | 4.2 µs | 262144 | 1.5 |
+| `atom-swap-map-1k` | 13.9 µs | 131072 | 3.3 |
+| `atom-deref-map-1k` | 4.4 µs | 262144 | 1.9 |
+| `atom-$-get-map-1k` | 6.3 µs | 262144 | 10 |
+| `atom-reset-vec-1k` | 12.2 ms | 128 | 10 |
+| `sorted-set-build-200` | 29.2 ms | 64 | 5.9 |
+| `disk-swap-counter` | 182.1 µs | 8192 | 2.9 |
+| `thread-submit-64` | n/a | — | — |
 
-Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
-a time; a round of at least 1 s.
+Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s. `thread-submit-64` is n/a: `The "port" argument must be a MessagePort instance`.
 <!-- /perf:cljs -->
 
-Reading it: 2–5× the JVM's on swaps and its reads (a 1,000-key map's deref 1.7 ms against 0.38 ms), an int-map
-build 1.8× the JVM's (8.1 ms), a small deref twice as fast as the JVM's. The thread workload crosses to worker
-isolates (7.6 ms for 64 tasks). The browser runs the same compiled code faster on every in-memory workload
-(1.3–2.2×), its slabs growable — not investigated (Chromium's V8 against Node 24's, the perf page's smaller bundle).
+Reading it: ~2–3× the JVM on swaps (a counter swap 41.6 µs, a 1,000-key map's 13.9 µs). Reads are close to the JVM (a
+1,000-key map's deref 4.4 µs against 2.3 µs; a small deref 4.2 µs against 2.7 µs). `thread-submit-64` is n/a (`MessagePort`).
+A disk-domain swap is 182 µs. The browser ran the same compiled code faster on every in-memory workload in this run.
 
 What sets ClojureScript's numbers: V8 compiles the slab I/O to typed-array access and the allocator's bitmap scans are
 wasm-SIMD, so in-process work is within 2–3× of the JVM's (faster than the JVM's until the JVM's reflection fix); numbers are doubles (an INT64 past 2^53 is lossy on

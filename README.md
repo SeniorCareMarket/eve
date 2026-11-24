@@ -217,12 +217,11 @@ jank, phel) and a babashka atomics pod nothing uses.
 
 ## Performance
 
-The 0.9.3.1 measurements — Eve-DataScript vs stock DataScript, the startup shootout, the write and
-read repair rows, gaps named — are in [doc/performance.md](doc/performance.md). The suite below is
+The Eve-DataScript vs stock DataScript comparison, the startup shootout, and gaps named are in [doc/performance.md](doc/performance.md). The suite below is
 the per-host record.
 
-One performance suite (`test/eve/perf_suite.cljc`, ten workloads over the public API: swaps and derefs of in-process
-atoms, a zero-copy read, a 1,000-element reset, sorted-set and int-map builds, a disk-domain swap, 64 tasks through
+One performance suite (`test/eve/perf_suite.cljc`, nine workloads over the public API: swaps and derefs of in-process
+atoms, a zero-copy read, a 1,000-element reset, a sorted-set build, a disk-domain swap, 64 tasks through
 the compute pool) runs on every host: `bb scripts/perf-all.clj` runs them one at a time and writes
 [doc/hosts/perf-results.edn](doc/hosts/perf-results.edn). The table across hosts and each host's reading of its own
 numbers are in [doc/hosts/](doc/hosts/README.md). The cost of each seam, portable against native, on babashka is in
@@ -240,7 +239,7 @@ numbers are in [doc/hosts/](doc/hosts/README.md). The cost of each seam, portabl
 | [doc/collections.md](doc/collections.md), [doc/data-structures.md](doc/data-structures.md), [doc/obj.md](doc/obj.md) | the collections, typed arrays, objects, datasets |
 | [doc/platform-support.md](doc/platform-support.md) | the host matrix |
 | [doc/stm.md](doc/stm.md) | the STM: refs on Eve atoms, `dosync`, the history-encoding disclosure |
-| [doc/performance.md](doc/performance.md) | the 0.9.3.1 performance record: Eve-DataScript vs stock, the startup shootout, gaps named |
+| [doc/performance.md](doc/performance.md) | performance record: Eve-DataScript vs stock, the startup shootout, the host suite, gaps named |
 | [doc/hosts/](doc/hosts/README.md) | one page per host: its battery, its performance, how eve is built on it, gotchas, next steps |
 | [doc/architecture.md](doc/architecture.md), [doc/internals.md](doc/internals.md) | the design, the byte format, the slab allocator |
 | [doc/memory-model.md](doc/memory-model.md) | how memory is reclaimed, and where eve's code differs from the model |

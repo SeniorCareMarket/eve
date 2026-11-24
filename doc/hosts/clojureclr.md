@@ -35,20 +35,20 @@ including the network rung. Not run: the four typed-array suites — ClojureCLR 
 <!-- perf:cljr (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 92.1 µs | 16384 | 7.8 |
-| `atom-deref-small` | 89.7 µs | 16384 | 5.3 |
-| `atom-swap-map-1k` | 33.6 µs | 32768 | 7.2 |
-| `atom-deref-map-1k` | 4.2 ms | 256 | 11 |
-| `atom-$-get-map-1k` | 25.2 µs | 65536 | 12 |
-| `atom-reset-vec-1k` | 9.1 ms | 128 | 6.0 |
-| `sorted-set-build-200` | 77.8 ms | 16 | 7.0 |
-| `int-map-build-200` | 22.2 ms | 64 | 5.0 |
-| `disk-swap-counter` | 98.1 µs | 16384 | 5.6 |
-| `thread-submit-64` | 2.4 ms | 512 | 2.4 |
+| `atom-swap-counter` | — | — | — |
+| `atom-deref-small` | — | — | — |
+| `atom-swap-map-1k` | — | — | — |
+| `atom-deref-map-1k` | — | — | — |
+| `atom-$-get-map-1k` | — | — | — |
+| `atom-reset-vec-1k` | — | — | — |
+| `sorted-set-build-200` | — | — | — |
+| `disk-swap-counter` | — | — | — |
+| `thread-submit-64` | — | — | — |
 
-Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
-a time; a round of at least 1 s.
+Not re-run: `cljr` is not on PATH and this box has no .NET runtime. The command would have been `CLOJURE_LOAD_PATH=<cp :cljr> cljr -m eve.runner.cljr-main perf`. Previous numbers are not carried forward.
 <!-- /perf:cljr -->
+
+The table above was not re-run on this box (no .NET / `cljr`). The paragraph below describes the 2026-10-21 release-box table, kept as qualitative context only.
 
 Reading it: the fastest host outside the JVM and V8 on swaps (92.1 µs, 33.6 µs for a 1,000-key map's), and faster
 than ClojureScript on encoding a 1,000-element vector (9.1 ms against 11.5 ms). A small deref (89.7 µs) costs as much as

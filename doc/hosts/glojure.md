@@ -51,24 +51,22 @@ named) and the typed-array suites.
 <!-- perf:glj (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 2.1 ms | 512 | 178 |
-| `atom-deref-small` | 318.4 µs | 4096 | 19 |
-| `atom-swap-map-1k` | 4.6 ms | 256 | 991 |
-| `atom-deref-map-1k` | 72.6 ms | 16 | 192 |
-| `atom-$-get-map-1k` | 383.8 µs | 4096 | 187 |
-| `atom-reset-vec-1k` | 218.8 ms | 8 | 142 |
-| `sorted-set-build-200` | 2295.0 ms | 1 | 206 |
-| `int-map-build-200` | 1039.0 ms | 2 | 232 |
-| `disk-swap-counter` | 2.2 ms | 512 | 128 |
-| `thread-submit-64` | 7.4 ms | 256 | 7.5 |
+| `atom-swap-counter` | 5.3 ms | 256 | 411 |
+| `atom-deref-small` | 549.8 µs | 2048 | 202 |
+| `atom-swap-map-1k` | 12.3 ms | 128 | 2936 |
+| `atom-deref-map-1k` | 544.9 µs | 4096 | 240 |
+| `atom-$-get-map-1k` | 700.7 µs | 2048 | 1162 |
+| `atom-reset-vec-1k` | 504.5 ms | 2 | 425 |
+| `sorted-set-build-200` | 5857.0 ms | 1 | 1175 |
+| `disk-swap-counter` | 7.8 ms | 256 | 126 |
+| `thread-submit-64` | 10.6 ms | 128 | 3.5 |
 
-Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
-a time; a round of at least 1 s.
+Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
 <!-- /perf:glj -->
 
-Reading it: ~130–230× the JVM's on most workloads (a counter swap 2.1 ms, a sorted-set build 2.3 s) and ~1,000× on a
-swap into a 1,000-key map (4.6 ms): glojure interprets its AST and a protocol call is a multimethod on class.
-Goroutines run the thread workload in 7.4 ms.
+Reading it: ~410× the JVM on a counter swap (5.3 ms) and ~2,900× on a 1,000-key map swap (12.3 ms): glojure interprets its
+AST and a protocol call is a multimethod on class. Goroutines run the thread workload in 10.6 ms. A sorted-set build is
+5.86 s (one op).
 
 What sets glojure's numbers:
 

@@ -42,23 +42,21 @@ eve.net's own suites (`test/eve/net/*`) are not in the default list; they run wh
 <!-- perf:bb (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 324.7 µs | 4096 | 27 |
-| `atom-deref-small` | 68.9 µs | 16384 | 4.0 |
-| `atom-swap-map-1k` | 115.4 µs | 16384 | 25 |
-| `atom-deref-map-1k` | 12.2 ms | 128 | 32 |
-| `atom-$-get-map-1k` | 88.3 µs | 16384 | 43 |
-| `atom-reset-vec-1k` | 39.9 ms | 32 | 26 |
-| `sorted-set-build-200` | 484.3 ms | 4 | 44 |
-| `int-map-build-200` | 133.4 ms | 8 | 30 |
-| `disk-swap-counter` | 415.5 µs | 4096 | 24 |
-| `thread-submit-64` | 1.5 ms | 1024 | 1.5 |
+| `atom-swap-counter` | 1.4 ms | 1024 | 107 |
+| `atom-deref-small` | 97.2 µs | 16384 | 36 |
+| `atom-swap-map-1k` | 2.8 ms | 512 | 662 |
+| `atom-deref-map-1k` | 86.5 µs | 16384 | 38 |
+| `atom-$-get-map-1k` | 109.4 µs | 16384 | 181 |
+| `atom-reset-vec-1k` | 81.9 ms | 16 | 69 |
+| `sorted-set-build-200` | 1048.0 ms | 1 | 210 |
+| `disk-swap-counter` | 2.4 ms | 1024 | 39 |
+| `thread-submit-64` | 31.3 ms | 32 | 10 |
 
-Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
-a time; a round of at least 1 s.
+Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
 <!-- /perf:bb -->
 
-Reading it: ~25–45× the JVM's on in-memory work (sci interprets each call; a small deref 4×), a disk swap ~1.3× an
-in-memory one, and real threads: 64 tasks in 1.5 ms, the second-fastest thread workload of any host.
+Reading it: sci interpretation shows clearly — a counter swap 1.4 ms (~110× the JVM), a 1,000-key map swap 2.8 ms, and a
+disk-domain swap 2.4 ms, about 1.8× the in-memory counter. 64 tasks in 31.3 ms in this run.
 
 What sets babashka's numbers:
 
@@ -125,23 +123,21 @@ and a wait for ever is refused as a deadlock), no network atoms, and the portabl
 <!-- perf:bb-minimal (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 340.3 µs | 4096 | 29 |
-| `atom-deref-small` | 74.2 µs | 16384 | 4.3 |
-| `atom-swap-map-1k` | 140.0 µs | 8192 | 30 |
-| `atom-deref-map-1k` | 12.2 ms | 128 | 32 |
-| `atom-$-get-map-1k` | 97.5 µs | 16384 | 47 |
-| `atom-reset-vec-1k` | 42.3 ms | 32 | 28 |
-| `sorted-set-build-200` | 410.3 ms | 4 | 37 |
-| `int-map-build-200` | 132.1 ms | 8 | 29 |
-| `disk-swap-counter` | 383.1 µs | 4096 | 22 |
-| `thread-submit-64` | 1.9 ms | 1024 | 1.9 |
+| `atom-swap-counter` | 1.4 ms | 1024 | 110 |
+| `atom-deref-small` | 88.7 µs | 16384 | 33 |
+| `atom-swap-map-1k` | 693.8 µs | 2048 | 165 |
+| `atom-deref-map-1k` | 92.2 µs | 16384 | 41 |
+| `atom-$-get-map-1k` | 112.7 µs | 16384 | 187 |
+| `atom-reset-vec-1k` | 80.6 ms | 16 | 68 |
+| `sorted-set-build-200` | 1034.0 ms | 1 | 207 |
+| `disk-swap-counter` | 2.3 ms | 1024 | 38 |
+| `thread-submit-64` | 2.5 ms | 512 | 0.81 |
 
-Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
-a time; a round of at least 1 s.
+Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
 <!-- /perf:bb-minimal -->
 
-Reading it: babashka on the portable seams is within the box's noise of full babashka on these workloads; what the
-fast seams buy is in crypto and hashing (ADOPTER-TIERS §6), which this suite does not time.
+Reading it: in-memory work is close to full babashka (a counter swap 1.4 ms on both). `thread-submit-64` is 2.5 ms against
+full babashka's 31.3 ms in this run. What the fast seams buy is in crypto and hashing (ADOPTER-TIERS §6), which this suite does not time.
 
 ## Future directions
 

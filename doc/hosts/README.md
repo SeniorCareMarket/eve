@@ -34,7 +34,6 @@ about two budgets a workload and both report the same work's cost:
 | `atom-$-get-map-1k` | a zero-copy `get` in the 1,000-key map under `eve.atom/read-pinned` (one pinned read: the bound `$` regions are made of) |
 | `atom-reset-vec-1k` | `reset!` to `{:v (vec (range 1000))}` (encoding a 1,000-element vector) |
 | `sorted-set-build-200` | building a 200-element `eve.sorted` set inside a `swap!` |
-| `int-map-build-200` | building a 200-key int-map inside a `swap!` |
 | `disk-swap-counter` | `swap!` on a persistent atom in a disk domain (mmap, the cross-process CAS) |
 | `thread-submit-64` | 64 tasks (a `deftask`, so it crosses to an isolate by name) submitted to the default compute pool (a fixed pool of the host's parallelism), dereferenced |
 
@@ -43,39 +42,24 @@ bb scripts/perf-all.clj              # every host, one at a time (results: doc/h
 bb scripts/perf-all.clj jolt glj     # the hosts named
 ```
 
-The two build workloads build a 200-element int-map or sorted set inside one `swap!` through its constructor — a
-transient that begins from no tree, freeing each version a write supersedes — and the swap retires the structure it
-replaces by eve.retire's one walk (with the tally rule, 9.31); they run on their time budget like the others
-(2026-10-21).
-Until then they stopped at 16 builds (`:capped 16`) and built by 200 persistent ops, whose intermediate versions
-stayed allocated: the numbers in the tables below from runs before 2026-10-21 measure that workload.
-
-The suite found two defects on its first run, both fixed before these numbers (`7faf6597f`): an int32 field could not
-hold a slab offset past 2^31 (an int-map node threw "integer overflow" once its heap domain's small classes filled),
-and a fresh map or set written into an atom left 85% of what it allocated unreachable (the writers' own path copies).
+`sorted-set-build-200` builds a 200-element `eve.sorted` set inside one `swap!` through its constructor — a transient
+that begins from no tree, freeing each version a write supersedes — and the swap retires the structure it replaces by
+eve.retire's one walk (with the tally rule, 9.31). `int-map-build-200` was removed from the suite in 0.9.3.2 when
+PersistentIntMap was removed; those cells are not carried forward.
 
 <!-- perf:all (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | per operation | JVM | CLJS (Node) | browser | babashka | bb-minimal | nbb | ClojureCLR | basilisp | jolt | clojerl | glojure |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
-| `atom-swap-counter` | 11.8 µs | 33.2 µs | 15.3 µs | 324.7 µs | 340.3 µs | 301.0 µs | 92.1 µs | 8.9 ms | 160.8 µs | 366.9 µs | 2.1 ms |
-| `atom-deref-small` | 17.1 µs | 8.9 µs | 4.5 µs | 68.9 µs | 74.2 µs | 27.9 µs | 89.7 µs | 1.3 ms | 17.2 µs | 74.8 µs | 318.4 µs |
-| `atom-swap-map-1k` | 4.7 µs | 10.1 µs | 4.7 µs | 115.4 µs | 140.0 µs | 81.9 µs | 33.6 µs | 27.0 ms | 47.3 µs | 122.1 µs | 4.6 ms |
-| `atom-deref-map-1k` | 377.7 µs | 1.7 ms | 1.0 ms | 12.2 ms | 12.2 ms | 5.8 ms | 4.2 ms | 636.0 ms | 4.7 ms | 7.2 ms | 72.6 ms |
-| `atom-$-get-map-1k` | 2.1 µs | 6.4 µs | 3.4 µs | 88.3 µs | 97.5 µs | 33.7 µs | 25.2 µs | 2.1 ms | 25.0 µs | 75.5 µs | 383.8 µs |
-| `atom-reset-vec-1k` | 1.5 ms | 11.5 ms | 6.0 ms | 39.9 ms | 42.3 ms | 78.3 ms | 9.1 ms | 1630.0 ms | 16.5 ms | 456.5 ms | 218.8 ms |
-| `sorted-set-build-200` | 11.1 ms | 36.4 ms | 19.7 ms | 484.3 ms | 410.3 ms | 260.8 ms | 77.8 ms | 9197.0 ms | 182.8 ms | 570.0 ms | 2295.0 ms |
-| `int-map-build-200` | 4.5 ms | 8.1 ms | 6.4 ms | 133.4 ms | 132.1 ms | 171.3 ms | 22.2 ms | 2539.0 ms | 81.4 ms | 341.5 ms | 1039.0 ms |
-| `disk-swap-counter` | 17.6 µs | 43.7 µs | n/a | 415.5 µs | 383.1 µs | 308.6 µs | 98.1 µs | 9.6 ms | 177.9 µs | 524.9 µs | 2.2 ms |
-| `thread-submit-64` | 985.4 µs | 7.6 ms | 5.8 ms | 1.5 ms | 1.9 ms | 11.0 ms | 2.4 ms | 280.5 ms | 2.2 ms | 15.8 ms | 7.4 ms |
+| `atom-swap-counter` | 12.8 µs | 41.6 µs | 17.9 µs | 1.4 ms | 1.4 ms | 535.6 µs | — | 12.2 ms | 15.9 µs | — | 5.3 ms |
+| `atom-deref-small` | 2.7 µs | 4.2 µs | 2.8 µs | 97.2 µs | 88.7 µs | 21.4 µs | — | 10.1 ms | 1.7 µs | — | 549.8 µs |
+| `atom-swap-map-1k` | 4.2 µs | 13.9 µs | 7.0 µs | 2.8 ms | 693.8 µs | 135.4 µs | — | 3657.0 ms | 6.7 µs | — | 12.3 ms |
+| `atom-deref-map-1k` | 2.3 µs | 4.4 µs | 2.5 µs | 86.5 µs | 92.2 µs | 24.6 µs | — | 1872.0 ms | 1.6 µs | — | 544.9 µs |
+| `atom-$-get-map-1k` | 0.6 µs | 6.3 µs | 2.9 µs | 109.4 µs | 112.7 µs | 55.2 µs | — | 619.6 µs | 0.8 µs | — | 700.7 µs |
+| `atom-reset-vec-1k` | 1.2 ms | 12.2 ms | 6.6 ms | 81.9 ms | 80.6 ms | 85.4 ms | — | 3845.0 ms | 3.7 ms | — | 504.5 ms |
+| `sorted-set-build-200` | 5.0 ms | 29.2 ms | 14.6 ms | 1048.0 ms | 1034.0 ms | 193.5 ms | — | 10934.0 ms | 10.4 ms | — | 5857.0 ms |
+| `disk-swap-counter` | 61.8 µs | 182.1 µs | n/a | 2.4 ms | 2.3 ms | 1.3 ms | — | 17.2 ms | 139.0 µs | — | 7.8 ms |
+| `thread-submit-64` | 3.1 ms | n/a | 125.9 ms | 31.3 ms | 2.5 ms | n/a | — | 125.3 ms | 4.5 ms | — | 10.6 ms |
 <!-- /perf:all -->
 
-Lower is faster. Every host was run on the release box, one at a time with nothing else running, in one window
-(2026-10-21, 10:56–11:06 PM ET, the final tree `77b649aa5`; basilisp's column alone, 1:44–1:46 AM ET on
-2026-10-22). **The box varies by more than a few percent**: two runs
-of unchanged code earlier on 2026-10-21 differed by a median of 1.09–1.64× per host and up to 2.33× on one workload.
-Against the run at 2:37–2:47 PM ET (`08b94cbf4`, before 9.31), on the eight workloads that are not builds, this one's
-median per host is 0.90–1.14× and its rows 0.65–1.75×, 36 of 87 rows faster; the largest moves, `atom-reset-vec-1k`
-1.16–1.75× slower on seven hosts (1.00× on the JVM), are not investigated. Read a difference under ~1.5× between two
-hosts as noise; the orders of magnitude between groups of hosts are what this table measures. The two build rows
-measure the constructor and the swap's walk of the tree it replaces (9.25); what reclaiming costs a build was measured
-apart, both trees on the box at once (2026-10-21).
+Lower is faster. Every host that could run was measured on this box (J, Linux x86_64, Temurin 21.0.13, jolt v0.8.28, bb 1.13.226, Node 24.22.1, Basilisp 0.5.1), one at a time, 2026-11-23 8:53–9:08 PM ET, Eve `507235b`. ClojureCLR has no .NET/`cljr` on this box. clojerl dies at compile (`eve/flat_io.cljc:304` cannot resolve `long`). cljs and nbb's `thread-submit-64` fail with `The "port" argument must be a MessagePort instance` (n/a). The browser's `disk-swap-counter` is n/a (no disk domains in a page). **The box varies**: read a difference under ~1.5× between two hosts as possible noise; the orders of magnitude between groups of hosts are what this table measures. Older tables, including the 2026-10-21 release-box run, remain in git history.
+

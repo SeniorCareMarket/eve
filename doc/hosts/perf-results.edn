@@ -3,221 +3,173 @@
  {:jolt
   {:host :jolt,
    :exit 0,
-   :wall-s 47,
+   :wall-s 28,
    :lines
-   [{:perf :atom-swap-counter, :ops 8192, :ms 1317, :ns-per-op 160766}
-    {:perf :atom-deref-small, :ops 65536, :ms 1129, :ns-per-op 17227}
-    {:perf :atom-swap-map-1k, :ops 32768, :ms 1549, :ns-per-op 47271}
-    {:perf :atom-deref-map-1k, :ops 256, :ms 1202, :ns-per-op 4695312}
-    {:perf :atom-$-get-map-1k, :ops 65536, :ms 1639, :ns-per-op 25009}
-    {:perf :atom-reset-vec-1k, :ops 64, :ms 1057, :ns-per-op 16515625}
+   [{:perf :atom-swap-counter, :ops 65536, :ms 1040, :ns-per-op 15869}
+    {:perf :atom-deref-small, :ops 1048576, :ms 1743, :ns-per-op 1662}
+    {:perf :atom-swap-map-1k, :ops 262144, :ms 1765, :ns-per-op 6732}
+    {:perf :atom-deref-map-1k, :ops 1048576, :ms 1701, :ns-per-op 1622}
+    {:perf :atom-$-get-map-1k, :ops 2097152, :ms 1640, :ns-per-op 782}
+    {:perf :atom-reset-vec-1k, :ops 512, :ms 1885, :ns-per-op 3681640}
     {:perf :sorted-set-build-200,
-     :ops 8,
-     :ms 1462,
-     :ns-per-op 182750000}
-    {:perf :int-map-build-200, :ops 16, :ms 1303, :ns-per-op 81437500}
-    {:perf :disk-swap-counter, :ops 8192, :ms 1457, :ns-per-op 177856}
-    {:perf :thread-submit-64, :ops 512, :ms 1110, :ns-per-op 2167968}],
-   :at "2026-10-22T03:06:50.710235572Z"},
+     :ops 128,
+     :ms 1326,
+     :ns-per-op 10359375}
+    {:perf :disk-swap-counter, :ops 8192, :ms 1139, :ns-per-op 139038}
+    {:perf :thread-submit-64, :ops 256, :ms 1157, :ns-per-op 4519531}],
+   :at "2026-11-24T02:07:17.950145386Z"},
   :bb
   {:host :bb,
    :exit 0,
-   :wall-s 32,
+   :wall-s 31,
    :lines
-   [{:perf :atom-swap-counter, :ops 4096, :ms 1330, :ns-per-op 324707}
-    {:perf :atom-deref-small, :ops 16384, :ms 1129, :ns-per-op 68908}
-    {:perf :atom-swap-map-1k, :ops 16384, :ms 1891, :ns-per-op 115417}
-    {:perf :atom-deref-map-1k, :ops 128, :ms 1567, :ns-per-op 12242187}
-    {:perf :atom-$-get-map-1k, :ops 16384, :ms 1446, :ns-per-op 88256}
-    {:perf :atom-reset-vec-1k, :ops 32, :ms 1276, :ns-per-op 39875000}
+   [{:perf :atom-swap-counter, :ops 1024, :ms 1396, :ns-per-op 1363281}
+    {:perf :atom-deref-small, :ops 16384, :ms 1592, :ns-per-op 97167}
+    {:perf :atom-swap-map-1k, :ops 512, :ms 1422, :ns-per-op 2777343}
+    {:perf :atom-deref-map-1k, :ops 16384, :ms 1418, :ns-per-op 86547}
+    {:perf :atom-$-get-map-1k, :ops 16384, :ms 1793, :ns-per-op 109436}
+    {:perf :atom-reset-vec-1k, :ops 16, :ms 1311, :ns-per-op 81937500}
     {:perf :sorted-set-build-200,
-     :ops 4,
-     :ms 1937,
-     :ns-per-op 484250000}
-    {:perf :int-map-build-200, :ops 8, :ms 1067, :ns-per-op 133375000}
-    {:perf :disk-swap-counter, :ops 4096, :ms 1702, :ns-per-op 415527}
-    {:perf :thread-submit-64,
-     :ops 1024,
-     :ms 1559,
-     :ns-per-op 1522460}],
-   :at "2026-10-22T03:06:50.710229969Z"},
+     :ops 1,
+     :ms 1048,
+     :ns-per-op 1048000000}
+    {:perf :disk-swap-counter, :ops 1024, :ms 2463, :ns-per-op 2405273}
+    {:perf :thread-submit-64, :ops 32, :ms 1001, :ns-per-op 31281250}],
+   :at "2026-11-24T02:02:51.430977188Z"},
   :browser
   {:host :browser,
    :exit 0,
-   :wall-s 47,
+   :wall-s 48,
    :lines
-   [{:perf :atom-swap-counter, :ops 65536, :ms 1004, :ns-per-op 15319}
-    {:perf :atom-deref-small, :ops 262144, :ms 1183, :ns-per-op 4512}
-    {:perf :atom-swap-map-1k, :ops 262144, :ms 1235, :ns-per-op 4711}
-    {:perf :atom-deref-map-1k, :ops 1024, :ms 1030, :ns-per-op 1005859}
-    {:perf :atom-$-get-map-1k, :ops 524288, :ms 1802, :ns-per-op 3437}
-    {:perf :atom-reset-vec-1k, :ops 256, :ms 1545, :ns-per-op 6035156}
-    {:perf :sorted-set-build-200,
-     :ops 64,
-     :ms 1260,
-     :ns-per-op 19687500}
-    {:perf :int-map-build-200, :ops 256, :ms 1647, :ns-per-op 6433593}
+   [{:ms 1173, :ops 65536, :perf :atom-swap-counter, :ns-per-op 17898}
+    {:ms 1445, :ops 524288, :perf :atom-deref-small, :ns-per-op 2756}
+    {:ms 1840, :ops 262144, :perf :atom-swap-map-1k, :ns-per-op 7019}
+    {:ms 1320, :ops 524288, :perf :atom-deref-map-1k, :ns-per-op 2517}
+    {:ms 1537, :ops 524288, :perf :atom-$-get-map-1k, :ns-per-op 2931}
+    {:ms 1692, :ops 256, :perf :atom-reset-vec-1k, :ns-per-op 6609375}
+    {:ms 1865,
+     :ops 128,
+     :perf :sorted-set-build-200,
+     :ns-per-op 14570312}
     {:perf :disk-swap-counter, :error "require is not defined"}
-    {:perf :thread-submit-64, :ops 256, :ms 1486, :ns-per-op 5804687}],
-   :at "2026-10-22T03:06:50.710228685Z"},
+    {:ms 1007, :ops 8, :perf :thread-submit-64, :ns-per-op 125875000}],
+   :at "2026-11-24T02:02:20.090746462Z"},
   :lpy
   {:host :lpy,
    :exit 0,
-   :wall-s 87,
+   :wall-s 171,
    :lines
-   [{:ms 1145, :ns-per-op 8945312, :ops 128, :perf :atom-swap-counter}
-    {:ms 1348, :ns-per-op 1316406, :ops 1024, :perf :atom-deref-small}
-    {:ms 1729, :ns-per-op 27015625, :ops 64, :perf :atom-swap-map-1k}
-    {:ms 1272, :ns-per-op 636000000, :ops 2, :perf :atom-deref-map-1k}
-    {:ms 1095, :ns-per-op 2138671, :ops 512, :perf :atom-$-get-map-1k}
-    {:ms 1630, :ns-per-op 1630000000, :ops 1, :perf :atom-reset-vec-1k}
-    {:ms 9197,
-     :ns-per-op 9197000000,
-     :ops 1,
-     :perf :sorted-set-build-200}
-    {:ms 2539, :ns-per-op 2539000000, :ops 1, :perf :int-map-build-200}
-    {:ms 1228, :ns-per-op 9593750, :ops 128, :perf :disk-swap-counter}
-    {:ms 2244, :ns-per-op 280500000, :ops 8, :perf :thread-submit-64}],
-   :at "2026-10-22T05:45:46.560802664Z"},
+   [{:ms 1557, :perf :atom-swap-counter, :ns-per-op 12164062, :ops 128}
+    {:ms 1292, :perf :atom-deref-small, :ns-per-op 10093750, :ops 128}
+    {:ms 3657, :perf :atom-swap-map-1k, :ns-per-op 3657000000, :ops 1}
+    {:ms 1872, :perf :atom-deref-map-1k, :ns-per-op 1872000000, :ops 1}
+    {:ms 1269, :perf :atom-$-get-map-1k, :ns-per-op 619628, :ops 2048}
+    {:ms 3845, :perf :atom-reset-vec-1k, :ns-per-op 3845000000, :ops 1}
+    {:ms 10934,
+     :perf :sorted-set-build-200,
+     :ns-per-op 10934000000,
+     :ops 1}
+    {:ms 1103, :perf :disk-swap-counter, :ns-per-op 17234375, :ops 64}
+    {:ms 1002, :perf :thread-submit-64, :ns-per-op 125250000, :ops 8}],
+   :at "2026-11-24T02:06:49.399333070Z"},
   :glj
   {:host :glj,
    :exit 0,
-   :wall-s 43,
+   :wall-s 74,
    :lines
-   [{:perf :atom-swap-counter, :ops 512, :ms 1078, :ns-per-op 2105468}
-    {:perf :atom-deref-small, :ops 4096, :ms 1304, :ns-per-op 318359}
-    {:perf :atom-swap-map-1k, :ops 256, :ms 1180, :ns-per-op 4609375}
-    {:perf :atom-deref-map-1k, :ops 16, :ms 1161, :ns-per-op 72562500}
-    {:perf :atom-$-get-map-1k, :ops 4096, :ms 1572, :ns-per-op 383789}
-    {:perf :atom-reset-vec-1k, :ops 8, :ms 1750, :ns-per-op 218750000}
+   [{:perf :atom-swap-counter, :ops 256, :ms 1346, :ns-per-op 5257812}
+    {:perf :atom-deref-small, :ops 2048, :ms 1126, :ns-per-op 549804}
+    {:perf :atom-swap-map-1k, :ops 128, :ms 1577, :ns-per-op 12320312}
+    {:perf :atom-deref-map-1k, :ops 4096, :ms 2232, :ns-per-op 544921}
+    {:perf :atom-$-get-map-1k, :ops 2048, :ms 1435, :ns-per-op 700683}
+    {:perf :atom-reset-vec-1k, :ops 2, :ms 1009, :ns-per-op 504500000}
     {:perf :sorted-set-build-200,
      :ops 1,
-     :ms 2295,
-     :ns-per-op 2295000000}
-    {:perf :int-map-build-200, :ops 2, :ms 2078, :ns-per-op 1039000000}
-    {:perf :disk-swap-counter, :ops 512, :ms 1151, :ns-per-op 2248046}
-    {:perf :thread-submit-64, :ops 256, :ms 1886, :ns-per-op 7367187}],
-   :at "2026-10-22T03:06:50.710236717Z"},
+     :ms 5857,
+     :ns-per-op 5857000000}
+    {:perf :disk-swap-counter, :ops 256, :ms 1989, :ns-per-op 7769531}
+    {:perf :thread-submit-64,
+     :ops 128,
+     :ms 1360,
+     :ns-per-op 10625000}],
+   :at "2026-11-24T02:08:40.514854742Z"},
   :clje
   {:host :clje,
-   :exit 0,
-   :wall-s 66,
-   :lines
-   [{:ns-per-op 366943, :perf :atom-swap-counter, :ops 4096, :ms 1503}
-    {:ns-per-op 74768, :perf :atom-deref-small, :ops 16384, :ms 1225}
-    {:ns-per-op 122070, :perf :atom-swap-map-1k, :ops 8192, :ms 1000}
-    {:ns-per-op 7187500, :perf :atom-deref-map-1k, :ops 256, :ms 1840}
-    {:ns-per-op 75500, :perf :atom-$-get-map-1k, :ops 16384, :ms 1237}
-    {:ns-per-op 456500000, :perf :atom-reset-vec-1k, :ops 4, :ms 1826}
-    {:ns-per-op 570000000,
-     :perf :sorted-set-build-200,
-     :ops 2,
-     :ms 1140}
-    {:ns-per-op 341500000, :perf :int-map-build-200, :ops 4, :ms 1366}
-    {:ns-per-op 524902, :perf :disk-swap-counter, :ops 2048, :ms 1075}
-    {:ns-per-op 15812500,
-     :perf :thread-submit-64,
-     :ops 128,
-     :ms 2024}],
-   :at "2026-10-22T03:06:50.710236199Z"},
+   :exit 1,
+   :wall-s 8,
+   :lines [],
+   :at "2026-11-24T02:07:26.107072771Z"},
   :jvm
   {:host :jvm,
    :exit 0,
-   :wall-s 34,
+   :wall-s 33,
    :lines
-   [{:perf :atom-swap-counter, :ops 131072, :ms 1549, :ns-per-op 11817}
-    {:perf :atom-deref-small, :ops 65536, :ms 1118, :ns-per-op 17059}
-    {:perf :atom-swap-map-1k, :ops 262144, :ms 1219, :ns-per-op 4650}
-    {:perf :atom-deref-map-1k, :ops 4096, :ms 1547, :ns-per-op 377685}
-    {:perf :atom-$-get-map-1k, :ops 524288, :ms 1078, :ns-per-op 2056}
-    {:perf :atom-reset-vec-1k, :ops 1024, :ms 1573, :ns-per-op 1536132}
+   [{:perf :atom-swap-counter, :ops 131072, :ms 1676, :ns-per-op 12786}
+    {:perf :atom-deref-small, :ops 524288, :ms 1428, :ns-per-op 2723}
+    {:perf :atom-swap-map-1k, :ops 262144, :ms 1100, :ns-per-op 4196}
+    {:perf :atom-deref-map-1k, :ops 524288, :ms 1191, :ns-per-op 2271}
+    {:perf :atom-$-get-map-1k, :ops 2097152, :ms 1265, :ns-per-op 603}
+    {:perf :atom-reset-vec-1k, :ops 1024, :ms 1215, :ns-per-op 1186523}
     {:perf :sorted-set-build-200,
-     :ops 128,
-     :ms 1424,
-     :ns-per-op 11125000}
-    {:perf :int-map-build-200, :ops 256, :ms 1147, :ns-per-op 4480468}
-    {:perf :disk-swap-counter, :ops 65536, :ms 1154, :ns-per-op 17608}
-    {:perf :thread-submit-64, :ops 2048, :ms 2018, :ns-per-op 985351}],
-   :at "2026-10-22T03:06:50.710204031Z"},
+     :ops 256,
+     :ms 1276,
+     :ns-per-op 4984375}
+    {:perf :disk-swap-counter, :ops 32768, :ms 2026, :ns-per-op 61828}
+    {:perf :thread-submit-64, :ops 512, :ms 1564, :ns-per-op 3054687}],
+   :at "2026-11-24T01:54:01.751278132Z"},
   :bb-minimal
   {:host :bb-minimal,
    :exit 0,
    :wall-s 32,
    :lines
-   [{:perf :atom-swap-counter, :ops 4096, :ms 1394, :ns-per-op 340332}
-    {:perf :atom-deref-small, :ops 16384, :ms 1215, :ns-per-op 74157}
-    {:perf :atom-swap-map-1k, :ops 8192, :ms 1147, :ns-per-op 140014}
-    {:perf :atom-deref-map-1k, :ops 128, :ms 1563, :ns-per-op 12210937}
-    {:perf :atom-$-get-map-1k, :ops 16384, :ms 1597, :ns-per-op 97473}
-    {:perf :atom-reset-vec-1k, :ops 32, :ms 1354, :ns-per-op 42312500}
+   [{:perf :atom-swap-counter, :ops 1024, :ms 1437, :ns-per-op 1403320}
+    {:perf :atom-deref-small, :ops 16384, :ms 1453, :ns-per-op 88684}
+    {:perf :atom-swap-map-1k, :ops 2048, :ms 1421, :ns-per-op 693847}
+    {:perf :atom-deref-map-1k, :ops 16384, :ms 1511, :ns-per-op 92224}
+    {:perf :atom-$-get-map-1k, :ops 16384, :ms 1847, :ns-per-op 112731}
+    {:perf :atom-reset-vec-1k, :ops 16, :ms 1289, :ns-per-op 80562500}
     {:perf :sorted-set-build-200,
-     :ops 4,
-     :ms 1641,
-     :ns-per-op 410250000}
-    {:perf :int-map-build-200, :ops 8, :ms 1057, :ns-per-op 132125000}
-    {:perf :disk-swap-counter, :ops 4096, :ms 1569, :ns-per-op 383056}
-    {:perf :thread-submit-64,
-     :ops 1024,
-     :ms 1930,
-     :ns-per-op 1884765}],
-   :at "2026-10-22T03:06:50.710230983Z"},
-  :cljr
-  {:host :cljr,
-   :exit 0,
-   :wall-s 59,
-   :lines
-   [{:perf :atom-swap-counter, :ops 16384, :ms 1509, :ns-per-op 92102}
-    {:perf :atom-deref-small, :ops 16384, :ms 1470, :ns-per-op 89721}
-    {:perf :atom-swap-map-1k, :ops 32768, :ms 1102, :ns-per-op 33630}
-    {:perf :atom-deref-map-1k, :ops 256, :ms 1070, :ns-per-op 4179687}
-    {:perf :atom-$-get-map-1k, :ops 65536, :ms 1652, :ns-per-op 25207}
-    {:perf :atom-reset-vec-1k, :ops 128, :ms 1171, :ns-per-op 9148437}
-    {:perf :sorted-set-build-200,
-     :ops 16,
-     :ms 1244,
-     :ns-per-op 77750000}
-    {:perf :int-map-build-200, :ops 64, :ms 1421, :ns-per-op 22203125}
-    {:perf :disk-swap-counter, :ops 16384, :ms 1607, :ns-per-op 98083}
-    {:perf :thread-submit-64, :ops 512, :ms 1214, :ns-per-op 2371093}],
-   :at "2026-10-22T03:06:50.710233318Z"},
+     :ops 1,
+     :ms 1034,
+     :ns-per-op 1034000000}
+    {:perf :disk-swap-counter, :ops 1024, :ms 2404, :ns-per-op 2347656}
+    {:perf :thread-submit-64, :ops 512, :ms 1273, :ns-per-op 2486328}],
+   :at "2026-11-24T02:03:24.077335928Z"},
   :nbb
   {:host :nbb,
    :exit 0,
-   :wall-s 38,
+   :wall-s 33,
    :lines
-   [{:perf :atom-swap-counter, :ops 4096, :ms 1233, :ns-per-op 301025}
-    {:perf :atom-deref-small, :ops 65536, :ms 1830, :ns-per-op 27923}
-    {:perf :atom-swap-map-1k, :ops 16384, :ms 1342, :ns-per-op 81909}
-    {:perf :atom-deref-map-1k, :ops 256, :ms 1484, :ns-per-op 5796875}
-    {:perf :atom-$-get-map-1k, :ops 32768, :ms 1105, :ns-per-op 33721}
-    {:perf :atom-reset-vec-1k, :ops 16, :ms 1253, :ns-per-op 78312500}
+   [{:perf :atom-swap-counter, :ops 2048, :ms 1097, :ns-per-op 535644}
+    {:perf :atom-deref-small, :ops 65536, :ms 1404, :ns-per-op 21423}
+    {:perf :atom-swap-map-1k, :ops 8192, :ms 1109, :ns-per-op 135375}
+    {:perf :atom-deref-map-1k, :ops 65536, :ms 1614, :ns-per-op 24627}
+    {:perf :atom-$-get-map-1k, :ops 32768, :ms 1810, :ns-per-op 55236}
+    {:perf :atom-reset-vec-1k, :ops 16, :ms 1367, :ns-per-op 85437500}
     {:perf :sorted-set-build-200,
-     :ops 4,
-     :ms 1043,
-     :ns-per-op 260750000}
-    {:perf :int-map-build-200, :ops 8, :ms 1370, :ns-per-op 171250000}
-    {:perf :disk-swap-counter, :ops 4096, :ms 1264, :ns-per-op 308593}
+     :ops 8,
+     :ms 1548,
+     :ns-per-op 193500000}
+    {:perf :disk-swap-counter, :ops 1024, :ms 1317, :ns-per-op 1286132}
     {:perf :thread-submit-64,
-     :ops 128,
-     :ms 1412,
-     :ns-per-op 11031250}],
-   :at "2026-10-22T03:06:50.710232125Z"},
+     :error "The \"port\" argument must be a MessagePort instance"}],
+   :at "2026-11-24T02:03:57.812732566Z"},
   :cljs
   {:host :cljs,
    :exit 0,
-   :wall-s 49,
+   :wall-s 46,
    :lines
-   [{:perf :atom-swap-counter, :ops 32768, :ms 1087, :ns-per-op 33172}
-    {:perf :atom-deref-small, :ops 131072, :ms 1171, :ns-per-op 8934}
-    {:perf :atom-swap-map-1k, :ops 131072, :ms 1321, :ns-per-op 10078}
-    {:perf :atom-deref-map-1k, :ops 1024, :ms 1780, :ns-per-op 1738281}
-    {:perf :atom-$-get-map-1k, :ops 262144, :ms 1689, :ns-per-op 6443}
-    {:perf :atom-reset-vec-1k, :ops 128, :ms 1466, :ns-per-op 11453125}
+   [{:perf :atom-swap-counter, :ops 32768, :ms 1363, :ns-per-op 41595}
+    {:perf :atom-deref-small, :ops 262144, :ms 1100, :ns-per-op 4196}
+    {:perf :atom-swap-map-1k, :ops 131072, :ms 1828, :ns-per-op 13946}
+    {:perf :atom-deref-map-1k, :ops 262144, :ms 1158, :ns-per-op 4417}
+    {:perf :atom-$-get-map-1k, :ops 262144, :ms 1654, :ns-per-op 6309}
+    {:perf :atom-reset-vec-1k, :ops 128, :ms 1566, :ns-per-op 12234375}
     {:perf :sorted-set-build-200,
-     :ops 32,
-     :ms 1165,
-     :ns-per-op 36406250}
-    {:perf :int-map-build-200, :ops 128, :ms 1036, :ns-per-op 8093750}
-    {:perf :disk-swap-counter, :ops 32768, :ms 1431, :ns-per-op 43670}
-    {:perf :thread-submit-64, :ops 256, :ms 1935, :ns-per-op 7558593}],
-   :at "2026-10-22T03:06:50.710225534Z"}}}
+     :ops 64,
+     :ms 1868,
+     :ns-per-op 29187500}
+    {:perf :disk-swap-counter, :ops 8192, :ms 1492, :ns-per-op 182128}
+    {:perf :thread-submit-64,
+     :error "The \"port\" argument must be a MessagePort instance"}],
+   :at "2026-11-24T02:01:31.846928836Z"}}}

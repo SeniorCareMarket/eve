@@ -34,26 +34,23 @@ read all 71 rows on the JVM, none skipped.
 <!-- perf:jvm (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 11.8 µs | 131072 | 1.0 |
-| `atom-deref-small` | 17.1 µs | 65536 | 1.0 |
-| `atom-swap-map-1k` | 4.7 µs | 262144 | 1.0 |
-| `atom-deref-map-1k` | 377.7 µs | 4096 | 1.0 |
-| `atom-$-get-map-1k` | 2.1 µs | 524288 | 1.0 |
-| `atom-reset-vec-1k` | 1.5 ms | 1024 | 1.0 |
-| `sorted-set-build-200` | 11.1 ms | 128 | 1.0 |
-| `int-map-build-200` | 4.5 ms | 256 | 1.0 |
-| `disk-swap-counter` | 17.6 µs | 65536 | 1.0 |
-| `thread-submit-64` | 985.4 µs | 2048 | 1.0 |
+| `atom-swap-counter` | 12.8 µs | 131072 | 1.0 |
+| `atom-deref-small` | 2.7 µs | 524288 | 1.0 |
+| `atom-swap-map-1k` | 4.2 µs | 262144 | 1.0 |
+| `atom-deref-map-1k` | 2.3 µs | 524288 | 1.0 |
+| `atom-$-get-map-1k` | 0.6 µs | 2097152 | 1.0 |
+| `atom-reset-vec-1k` | 1.2 ms | 1024 | 1.0 |
+| `sorted-set-build-200` | 5.0 ms | 256 | 1.0 |
+| `disk-swap-counter` | 61.8 µs | 32768 | 1.0 |
+| `thread-submit-64` | 3.1 ms | 512 | 1.0 |
 
-Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
-a time; a round of at least 1 s.
+Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s.
 <!-- /perf:jvm -->
 
-Reading it: the fastest host on every workload but the small deref (the browser's and Node's are faster there), and
-on the thread workload by an order of magnitude over the hosts whose threads are isolates (64 tasks in 985 µs, ~15 µs a
-task, on platform threads). Two things in the table are not investigated yet: a counter swap on a one-key map (11.8
-µs) costs more than a swap of one key in a 1,000-key map (4.7 µs) — on ClojureScript too (33.2 µs, 10.1 µs) — and a
-deref of a two-key map (17.1 µs) more than a swap.
+Reading it: the fastest host on most workloads (cljs and the browser are within noise on a small deref: 4.2 µs and 2.8 µs
+against the JVM's 2.7 µs). 64 tasks in 3.1 ms on platform threads. A counter swap (12.8 µs) still costs more than a swap of
+one key in a 1,000-key map (4.2 µs) — on ClojureScript too (41.6 µs, 13.9 µs) — but a deref of a two-key map (2.7 µs) is
+now cheaper than a swap.
 
 The JVM is the column every other host's doc compares against. What sets its numbers, measured with JFR on a loop
 of counter swaps (2026-10-21 ET):

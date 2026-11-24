@@ -52,20 +52,20 @@ runner's own line is the measurement.)
 <!-- perf:clje (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 366.9 µs | 4096 | 31 |
-| `atom-deref-small` | 74.8 µs | 16384 | 4.4 |
-| `atom-swap-map-1k` | 122.1 µs | 8192 | 26 |
-| `atom-deref-map-1k` | 7.2 ms | 256 | 19 |
-| `atom-$-get-map-1k` | 75.5 µs | 16384 | 37 |
-| `atom-reset-vec-1k` | 456.5 ms | 4 | 297 |
-| `sorted-set-build-200` | 570.0 ms | 2 | 51 |
-| `int-map-build-200` | 341.5 ms | 4 | 76 |
-| `disk-swap-counter` | 524.9 µs | 2048 | 30 |
-| `thread-submit-64` | 15.8 ms | 128 | 16 |
+| `atom-swap-counter` | — | — | — |
+| `atom-deref-small` | — | — | — |
+| `atom-swap-map-1k` | — | — | — |
+| `atom-deref-map-1k` | — | — | — |
+| `atom-$-get-map-1k` | — | — | — |
+| `atom-reset-vec-1k` | — | — | — |
+| `sorted-set-build-200` | — | — | — |
+| `disk-swap-counter` | — | — | — |
+| `thread-submit-64` | — | — | — |
 
-Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
-a time; a round of at least 1 s.
+Failed: `clojerl … -m eve.runner.clje-main perf` exits 1 at compile — `adapters/flat-io/portable/src/eve/flat_io.cljc:304:13: Unable to resolve symbol: long`. The same error on a direct retry at 21:09 ET. Previous numbers are not carried forward.
 <!-- /perf:clje -->
+
+The table above has no numbers at this pin (compile fails; see the note on the table). The paragraph below describes the 2026-10-21 release-box table, kept as qualitative context only.
 
 Reading it: ~25–30× the JVM's on swaps (each slab access a NIF call), and encoding a 1,000-element vector is its
 outlier (457 ms — ~1,240× its counter swap, where the other hosts sit at 100–390×): the codec's per-element array

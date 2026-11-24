@@ -45,24 +45,21 @@ compiled ClojureScript's `thread-domain` suite from the ~3.8 GB its baseline not
 <!-- perf:nbb (from doc/hosts/perf-results.edn, written by bb scripts/perf-all.clj; formatted by hand) -->
 | Workload | per operation | operations in the timed round | × the JVM's |
 |---|---:|---:|---:|
-| `atom-swap-counter` | 301.0 µs | 4096 | 25 |
-| `atom-deref-small` | 27.9 µs | 65536 | 1.6 |
-| `atom-swap-map-1k` | 81.9 µs | 16384 | 18 |
-| `atom-deref-map-1k` | 5.8 ms | 256 | 15 |
-| `atom-$-get-map-1k` | 33.7 µs | 32768 | 16 |
-| `atom-reset-vec-1k` | 78.3 ms | 16 | 51 |
-| `sorted-set-build-200` | 260.8 ms | 4 | 23 |
-| `int-map-build-200` | 171.3 ms | 8 | 38 |
-| `disk-swap-counter` | 308.6 µs | 4096 | 18 |
-| `thread-submit-64` | 11.0 ms | 128 | 11 |
+| `atom-swap-counter` | 535.6 µs | 2048 | 42 |
+| `atom-deref-small` | 21.4 µs | 65536 | 7.9 |
+| `atom-swap-map-1k` | 135.4 µs | 8192 | 32 |
+| `atom-deref-map-1k` | 24.6 µs | 65536 | 11 |
+| `atom-$-get-map-1k` | 55.2 µs | 32768 | 92 |
+| `atom-reset-vec-1k` | 85.4 ms | 16 | 72 |
+| `sorted-set-build-200` | 193.5 ms | 8 | 39 |
+| `disk-swap-counter` | 1.3 ms | 1024 | 21 |
+| `thread-submit-64` | n/a | — | — |
 
-Measured 2026-10-21 10:56–11:06 PM ET on the final tree (`77b649aa5`) by `bb scripts/perf-all.clj`, every host one at
-a time; a round of at least 1 s.
+Measured 2026-11-23 8:53–9:08 PM ET on this box (J, Linux x86_64, Temurin 21.0.13) at Eve `507235b` by `bb scripts/perf-all.clj`, one host at a time; a round of at least 1 s. `thread-submit-64` is n/a: `The "port" argument must be a MessagePort instance`.
 <!-- /perf:nbb -->
 
-Reading it: babashka's interpretation cost on V8 — swaps near babashka's (a counter swap 301 µs against 325 µs, a
-1,000-key map's 81.9 µs against 115 µs), reads faster (V8's DataViews under sci: a small deref 27.9 µs against 68.9
-µs). 64 tasks: 11.0 ms, its workers each loading eve from source.
+Reading it: faster than babashka on every workload that both completed (a counter swap 536 µs against 1.4 ms, a 1,000-key
+map's 135 µs against 2.8 ms, a small deref 21.4 µs against 97.2 µs). `thread-submit-64` is n/a (`MessagePort`).
 
 What sets nbb's numbers: sci interprets every call, and eve's types are sci records answering eve's protocols, so
 nbb pays babashka's interpretation cost on V8 rather than SubstrateVM, with the module slab's DataView reads beneath.
