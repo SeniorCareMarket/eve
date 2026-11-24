@@ -5,6 +5,10 @@
 ;;   bb scripts/perf-all.clj                 # every host
 ;;   bb scripts/perf-all.clj bb jolt glj     # the hosts named
 ;;
+;; Each host command is `timeout -k 10 180` (override with MEASURE_TIMEOUT
+;; seconds; 0 disables). A process that cannot finish is recorded as
+;; {:perf :timed-out} (exit 124 or 137), never chased.
+;;
 ;; The extended runtimes are found on PATH or where eve's tool setup puts them (/opt/eve-tools; EVE_TOOLS overrides).
 ;; A host whose runtime is missing is reported as such, never skipped silently.
 (require '[babashka.fs :as fs] '[babashka.process :as p] '[clojure.edn :as edn] '[clojure.string :as str])
@@ -50,6 +54,11 @@
 
 (def order [:jvm :cljs :browser :bb :bb-minimal :nbb :cljr :lpy :jolt :clje :glj])
 
+(def measure-timeout-s
+  "Hard cap on each perf process (John, 2026-11-24 12:24 ET): timeout -k 10 180.
+   Override with MEASURE_TIMEOUT (seconds). 0 disables the cap."
+  (or (some-> (System/getenv "MEASURE_TIMEOUT") parse-long) 180))
+
 (defn- program
   "cmd with its program found on the extended path (babashka.process looks a program up on this process's PATH, not
    the :extra-env one)"
@@ -57,6 +66,14 @@
   (let [[prog & args] cmd
         found (some (fn [d] (let [f (fs/file d prog)] (when (fs/executable? f) (str f)))) (str/split path #":"))]
     (cons (or found prog) args)))
+
+(defn- timed-cmd
+  "cmd under timeout -k 10 MEASURE_TIMEOUT (default 180 s). A cell that cannot
+   finish exits 124 or 137 and is recorded as timed out, never chased."
+  [cmd]
+  (if (or (nil? measure-timeout-s) (not (pos? measure-timeout-s)))
+    (program cmd)
+    (concat ["timeout" "-k" "10" (str measure-timeout-s)] (program cmd))))
 
 (defn- perf-lines
   "The suite's lines: an EDN map with :perf (a host prints a map's keys in its own order: basilisp's begins :ops)."
@@ -81,15 +98,19 @@
         t0 (System/currentTimeMillis)
         res (reduce (fn [_ cmd]
                       (let [r (try @(apply p/process {:out :string :err :string :dir dir :extra-env (merge {"PATH" path} env)}
-                                                      (program cmd))
+                                           (timed-cmd cmd))
                                    (catch Exception e {:exit -1 :out "" :err (ex-message e)}))]
                         (if (zero? (:exit r)) r (reduced r))))
                     nil cmds)
-        lines (vec (perf-lines (:out res)))]
-    (println (str "== " (name h) ": " (count lines) " workloads, exit " (:exit res) ", "
+        timed-out? (contains? #{124 137} (:exit res))
+        lines (if timed-out?
+                [{:perf :timed-out :error (str "timeout -k 10 " measure-timeout-s)}]
+                (vec (perf-lines (:out res))))]
+    (println (str "== " (name h) ": " (count (perf-lines (:out res))) " workloads, exit " (:exit res)
+                  (when timed-out? " TIMED-OUT") ", "
                   (quot (- (System/currentTimeMillis) t0) 1000) " s"))
     (doseq [l lines] (println "  " (pr-str l)))
-    (when (empty? lines)
+    (when (and (empty? (perf-lines (:out res))) (not timed-out?))
       ;; a failed host's error is the diagnostic: print ALL of it.
       ;; Truncating it (400 chars, then head-8000, then tail-8000 across
       ;; three rounds) kept hiding the exception that mattered; the
