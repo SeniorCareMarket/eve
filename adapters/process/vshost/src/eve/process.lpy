@@ -1,0 +1,105 @@
+(ns eve.process
+  "eve's process primitives (HOST-CONTRACT §5) over Python's (basilisp) under CPython for
+   WASI: the clock, a thread's identity, sleep, a periodic timer, a hook at normal exit, and
+   files' existence, their exclusive creation and directories, and standard input's lines.
+
+   CPython for WASI starts no thread, so the periodic timer is the one thread's: start-timer!
+   records it and its due calls run where this seat waits — in sleep-ms!, the only place a
+   one-thread seat blocks — and in run-due-timers!, for a loop that waits elsewhere. A domain's
+   heartbeat (eve.atom, every 10 s) therefore beats while the program sleeps or pumps, and a
+   program that computes for longer than the period beats late, never concurrently.
+
+   Standard input carries the host's frame answers on this host (eve.region, adapters/region/
+   vshost): read-line is the process's, and a program that reads it takes what the bridge reads."
+  (:refer-clojure :exclude [read-line])
+  (:import atexit os os.path sys threading time))
+
+(defn now-ms []
+  (python/int (* 1000 (time/time))))
+
+(defn thread-id
+  "The identity a pinned epoch is kept under (threads share a worker slot)."
+  []
+  (threading/get-ident))
+
+
+
+(def ^:private timers (volatile! {}))   ;; handle -> {:period ms :next ms :f f}
+(def ^:private next-handle (volatile! 0))
+
+(defn run-due-timers!
+  "Call every timer whose time has come, once, and schedule its next call; the number called."
+  []
+  (let [now (now-ms)
+        due (filterv (fn [[_ t]] (<= (:next t) now)) @timers)]
+    (doseq [[h t] due]
+      (when (contains? @timers h)
+        (vswap! timers assoc-in [h :next] (+ now (:period t)))
+        ((:f t))))
+    (count due)))
+
+(defn sleep-ms!
+  "Block this thread for about ms milliseconds, running the timers that fall due meanwhile."
+  [ms]
+  (let [until (+ (now-ms) ms)]
+    (loop []
+      (run-due-timers!)
+      (let [now (now-ms)
+            nxt (reduce min until (map :next (vals @timers)))]
+        (when (< now until)
+          (time/sleep (/ (max 0 (- (min nxt until) now)) 1000.0))
+          (recur))))))
+
+(defn start-timer!
+  "Call f every period-ms until stop-timer! — from this thread, where it waits (sleep-ms!,
+   run-due-timers!). Returns the host's handle."
+  [period-ms f]
+  (let [h (vswap! next-handle inc)]
+    (vswap! timers assoc h {:period period-ms :next (+ (now-ms) period-ms) :f f})
+    h))
+
+(defn stop-timer! [h]
+  (when h
+    (vswap! timers dissoc h)))
+
+(defn on-process-exit!
+  "Run f when the process exits normally."
+  [f]
+  (atexit/register f))
+
+(defn file-exists? [path]
+  (os.path/exists path))
+
+(defn create-exclusive!
+  "Create the file at path, empty, if no file is there — one atomic step
+   against every other process: true for the process that created it, false
+   when it already existed (an mmap domain's creator is the one that gets true).
+   Here: os.open O_CREAT|O_EXCL."
+  [path]
+  (try (os/close (os/open path (bit-or os/O_CREAT os/O_EXCL os/O_WRONLY))) true
+       (catch python/FileExistsError _ false)))
+
+(defn ensure-parent-dir!
+  "Create the directory a domain's files live in (the default domain's ./eve/)."
+  [base-path]
+  (let [root-file (str base-path ".root")]
+    (os/makedirs (os.path/dirname (os.path/abspath root-file)) ** :exist-ok true)))
+
+(defn identity-hash
+  "An object's identity hash: equal for one object, whatever its own equality
+   or hash (a host object may answer none) — what eve's reference table keys
+   by (FORMAT-DECISIONS.md §9)."
+  [x]
+  (python/id x))
+
+(defn random-bytes
+  "n bytes from the operating system's entropy (os.urandom), as a vector of 0..255 — the one crypto input no portable
+   code can supply (eve.crypto/random-bytes)"
+  [n]
+  (vec (os/urandom n)))
+
+(defn read-line
+  "the next line of the process's standard input, its line end dropped; nil at the end of the input. Blocking"
+  []
+  (let [l (.readline sys/stdin)]
+    (when (pos? (python/len l)) (.rstrip l "\r\n"))))

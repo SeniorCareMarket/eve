@@ -73,6 +73,7 @@
 (def ^:private ^:const TAG-BIGINT         (unchecked-byte 0x16))
 (def ^:private ^:const TAG-RATIO          (unchecked-byte 0x17))
 (def ^:private ^:const TAG-BIGDEC         (unchecked-byte 0x18))
+(def ^:private ^:const TAG-BYTES          (unchecked-byte 0x28))
 ;; Flat collection tags — cross-process binary encoding (no SAB pointers)
 (def ^:private ^:const TAG-FLAT-MAP       (unchecked-byte 0xED))
 (def ^:private ^:const TAG-FLAT-SET       (unchecked-byte 0xEE))
@@ -235,6 +236,43 @@
 
 ;; --- EVE binary format — deserializer ---
 
+;; --- bytes: the one binary scalar, [0xEE][0xDB][0x28][len varint][raw] ---
+
+(def ^:private bytes-type
+  ;; the host's byte array type (the JVM's [B, babashka's, the CLR's byte[], ...),
+  ;; taken from eve.encoding's own constructor so every byte-array host names its own
+  (type (enc/make-bytes 0)))
+
+(defn host-bytes?
+  "v is a host byte array: written as the bytes scalar (tag 0x28), never as a
+   reference or an eve array."
+  [v]
+  (and (some? v) (identical? bytes-type (type v))))
+
+(defn- read-varint
+  "[value next-offset] of the unsigned LEB128 varint at i."
+  [^bytes b ^long i]
+  (loop [i i v 0 sh 0]
+    (let [x (read-u8 b i)
+          v (bit-or v (bit-shift-left (bit-and x 0x7F) sh))]
+      (if (< x 0x80) [v (inc i)] (recur (inc i) v (+ sh 7))))))
+
+(defn- varint-len [^long n]
+  (loop [n n k 1] (if (< n 0x80) k (recur (unsigned-bit-shift-right n 7) (inc k)))))
+
+(defn- bytes->eve-bytes
+  "BYTES: [0xEE][0xDB][0x28][len varint][raw] — the raw bytes copied once."
+  [^bytes v]
+  (let [n (alength v) k (varint-len n) b (byte-array (+ 3 k n))]
+    (aset b 0 MAGIC-0) (aset b 1 MAGIC-1) (aset b 2 TAG-BYTES)
+    (loop [n n i 3]
+      (if (< n 0x80)
+        (aset b i (unchecked-byte n))
+        (do (aset b i (unchecked-byte (bit-or 0x80 (bit-and n 0x7F))))
+            (recur (unsigned-bit-shift-right n 7) (inc i)))))
+    (enc/arraycopy v 0 b (+ 3 k) n)
+    b))
+
 (defn eve-bytes->value
   "Decode an EVE-format byte array into a Clojure value.
 
@@ -316,6 +354,10 @@
           0x16 (first (read-twos b 3))   ; TAG-BIGINT
           0x17 (let [[n o] (read-twos b 3) [d _] (read-twos b o)] (enc/make-ratio n d))   ; TAG-RATIO
           0x18 (enc/make-bigdec (first (read-twos b 7)) (read-i32-le b 3))   ; TAG-BIGDEC
+
+          ;; a run of bytes (ser/FAST_TAG_BYTES): an eve binary viewing it in b, the bytes this decode was handed —
+          ;; no copy (eve.bin)
+          0x28 (let [[n p] (read-varint b 3)] (ser/bin-view b p n))
 
           ;; a reference (§9): the value this process's table names, or a refusal
           0x15 (ser/handle->ref (read-u32-le b 3) (read-u32-le b 7))   ; TAG-REF
@@ -696,6 +738,13 @@
     (enc/bigdec? v)
     (bigdec->eve-bytes v)
 
+    (host-bytes? v)
+    (bytes->eve-bytes v)
+
+    ;; an eve binary (eve.bin): its scalar bytes, the run copied once
+    (ser/bin? v)
+    (ser/bin-scalar-bytes v)
+
     (map? v)
     (flat-map->eve-bytes v)
 
@@ -751,7 +800,7 @@
 
       (or (nil? v) (boolean? v) (integer? v) (float? v) (string? v)
           (keyword? v) (symbol? v) (enc/host-char? v)
-          (uuid? v) (enc/date? v) (enc/ratio? v) (enc/bigdec? v))
+          (uuid? v) (enc/date? v) (enc/ratio? v) (enc/bigdec? v) (host-bytes? v) (ser/bin? v))
       (value->eve-bytes v)
 
       ;; A host value presenting an Eve value (babashka's map entry, a

@@ -7,6 +7,7 @@
             [clojure.test.check.clojure-test :refer [defspec]]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [eve.bin :as bin]
             [eve.flat.chunk :as chunk])
   (:import [java.util Arrays Date UUID]))
 
@@ -72,11 +73,13 @@
 (defn- bytes-val? [x] (instance? byte-array-class x))
 
 (defn- value=
-  "Round-trip equality: byte arrays by content; maps and sets unordered
+  "Round-trip equality: byte arrays by content (a host one against the eve binary it reads back as); maps and sets unordered
    (a packed map's iteration order is canonical key order, not the
    original's); sequentials in order; everything else by =."
   [a b]
   (cond (and (bytes-val? a) (bytes-val? b)) (bytes= a b)
+        ;; a host byte array is written as the 0x28 scalar and reads back as an eve binary of its bytes (doc/flat/BIN.md)
+        (and (bytes-val? a) (bin/bin? b)) (bytes= a (bin/->bytes b))
         (and (map? a) (map? b))
         (and (= (count a) (count b))
              (every? (fn [[k v]] (and (contains? b k) (value= v (get b k)))) a))
