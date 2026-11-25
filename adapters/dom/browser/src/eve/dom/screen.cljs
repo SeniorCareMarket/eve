@@ -13,6 +13,7 @@
    wakes on the doorbell word (Atomics.waitAsync, or a posted bell where that is missing); not isolated, a worker posts
    its frame and blocks in a synchronous XHR that the service worker holds until the page posts the reply."
   (:require [eve.dom.codec :as c]
+            [eve.dom.values :as v]
             [eve.thread-host :as h]))
 
 ;; ---------------------------------------------------------------------------------------------------------------
@@ -88,7 +89,7 @@
                 (let [wr (c/writer 256)]
                   (c/u32! wr (count args))
                   (doseq [a args] (write-value wr a false 0))
-                  (let [b (.slice (.-buf wr) 0 (.-pos wr))]
+                  (let [b (.-buffer (c/bytes wr))]
                     (send #js {:eveTag "eve.dom" :op "cb" :cb id :args b} #js [b])))
                 js/undefined)]
         (.set stubs k #js {:ref (js/WeakRef. f) :gen gen})
@@ -104,7 +105,7 @@
   (c/u8! w c/T-HANDLE)
   (c/i32! w (register! o))
   (c/u8! w kind)
-  (c/str! w (if (= kind 1) (or (.-name o) "") (c/type-name o))))
+  (c/str! w (if (= kind 1) (or (.-name o) "") (v/type-name o))))
 
 (defn write-value
   "Write page value v. A function-valued property read by GET (method? true) crosses as a method marker, not a
@@ -126,7 +127,7 @@
           (c/u32! w (.-length v))
           (dotimes [i (.-length v)] (write-value w (aget v i) false (inc depth))))
       (write-handle w v 0))
-    (and (c/plain-object? v) (c/data? v depth))
+    (and (v/plain-object? v) (v/data? v depth))
     (let [ks (js/Object.keys v)]
       (c/u8! w c/T-OBJECT)
       (c/u32! w (.-length ks))
@@ -190,7 +191,7 @@
               (vswap! errors inc)
               (js/console.error (str "eve.dom: a queued op (" op ") failed on the page: " (.-name e) ": " (.-message e)))))
           ;; answering ops: the value, or the error as a value
-          (let [at (.-pos out)]
+          (let [at (c/pos out)]
             (try
               (condp = op
                 ;; a function property is a method (called by name on its owner), unless its name is a
@@ -200,7 +201,7 @@
                 c/OP-CALL (let [o (lookup (c/r-i32 r)) k (c/r-str r) args (read-args r w)
                                 f (aget o k)]
                             (when-not (fn? f)
-                              (throw (js/TypeError. (str k " is not a function on " (c/type-name o)))))
+                              (throw (js/TypeError. (str k " is not a function on " (v/type-name o)))))
                             (write-value out (.apply f o args) false 0))
                 c/OP-APPLY (let [f (lookup (c/r-i32 r)) this (read-value r w) args (read-args r w)]
                              (write-value out (.apply f this args) false 0))
@@ -214,10 +215,10 @@
                 c/OP-ALLOC (write-value out (alloc! (c/r-u32 r)) false 0)
                 (throw (js/Error. (str "eve.dom: unknown op " op))))
               (catch :default e
-                (set! (.-pos out) at)
+                (c/seek! out at)
                 (write-error out e)))))))
     (c/patch-u32! out 0 @errors)
-    (c/copy-out (.-u8 out) 0 (.-pos out))))
+    (c/bytes out)))
 
 ;; ---------------------------------------------------------------------------------------------------------------
 ;; the SAB transport
@@ -270,7 +271,7 @@
               (answer-slot! ctl u8 i (exec-frame (.-bytes p) i)))))
 
       :else
-      (answer-slot! ctl u8 i (exec-frame (c/copy-out u8 (c/data-at i) n) i)))))
+      (answer-slot! ctl u8 i (exec-frame (v/copy-out u8 (c/data-at i) n) i)))))
 
 (defn pump!
   "Serve every slot holding a request, then wait (without blocking the page) for the doorbell."
