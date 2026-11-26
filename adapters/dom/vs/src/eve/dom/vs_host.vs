@@ -14,7 +14,7 @@
    :vs-call (calling it is OP-APPLY), every handle :vs-ctor (new is OP-NEW). One proxy per handle (no collection on
    VS: a handle lives as long as the program).
 
-   VALUES: VS's JS arrays are vectors (and its Java arrays); a plain object is a js.Object box or a map with no
+   VALUES: VS's JS arrays are growable, backed by VS vectors (vs.cljs's array-of; a vector and a Java array read as one too); a plain object is a js.Object box or a map with no
    :vs-type (its keys by name); VS has no undefined (nil); a page error is thrown as a js.<name> error box."
   (:require [eve.dom.core :as core]
             [eve.flat-io :as fio]
@@ -109,8 +109,8 @@
    :undefined (fn [] nil)
    :undefined? (fn [_] false)
    :array? (fn [x] (and (not (map? x)) (j/js-array? x)))
-   :array-items (fn [x] (vec x))
-   :make-array (fn [v] v)
+   :array-items (fn [x] (j/arr-items x))
+   :make-array (fn [v] (j/array-of v))   ;; a page's array arrives as VS's JavaScript array: growable, backed by v
    :object? plain-object?
    :object-items object-items
    :make-object (fn [kvs] (j/make-object kvs))
