@@ -351,6 +351,14 @@
    "removeAttributeNS" (fn [n [_ k]] (remove-attr! n (str k)) ::undefined)
    "appendChild" (fn [n [ch]] (insert! n ch nil))
    "append" (fn [n chs] (doseq [ch chs] (insert! n (if (string? ch) (text-node ch) ch) nil)) ::undefined)
+   ;; ParentNode.replaceChildren: every child out, then the arguments in, in order (a string as a text node).
+   ;; MEASURED before (CP26 pair 36670ea8fb6b7002, test/vs/reagami_test.vs): reagami's
+   ;; (.apply parent.replaceChildren parent …) read the property as ::undefined and walled at run form 7659,
+   ;; "Cannot read properties of null (reading 'apply')".
+   "replaceChildren" (fn [n chs]
+                       (doseq [ch (:children @n)] (detach! ch))
+                       (doseq [ch chs] (insert! n (if (string? ch) (text-node ch) ch) nil))
+                       ::undefined)
    "insertBefore" (fn [n [ch ref]] (insert! n ch ref))
    "removeChild" (fn [n [ch]]
                    (when-not (identical? n (:parent @ch))

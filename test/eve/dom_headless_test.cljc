@@ -92,6 +92,11 @@
     (testing "a page error is thrown here with its name (an answering call: a queued one's error is counted, as on a page)"
       (let [e (try (call doc "querySelector" "[[") nil (catch #?(:clj Throwable :cljs :default :default :default) e e))]
         (is (some? e))))
+    (testing "replaceChildren: every child out, then the arguments in, in order (a string as a text node)"
+      (let [box (call doc "createElement" "div")]
+        (call box "appendChild" (call doc "createElement" "b"))
+        (call box "replaceChildren" (call doc "createElement" "i") "t")
+        (is (= "<div><i></i>t</div>" (get* box "outerHTML")))))
     (testing "remove and replace"
       (let [p (call doc "createElement" "p")
             q (call doc "createElement" "q")]
