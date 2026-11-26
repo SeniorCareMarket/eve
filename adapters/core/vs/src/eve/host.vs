@@ -9,7 +9,7 @@
    expansion sit inside the one macro that writes the others, and each written macro's body is its own expansion.
 
    `locking` is the one name VS's core lacks: a re-entrant lock per value, its word in linear memory (`lock!`)."
-  (:require [vs.thread :as th])
+  (:require [vs.base.thread :as th])
   (:refer-clojure :exclude [aget aset alength aclone byte-array short-array int-array
                             long-array float-array double-array object-array into-array
                             to-array unchecked-byte unchecked-short unchecked-int

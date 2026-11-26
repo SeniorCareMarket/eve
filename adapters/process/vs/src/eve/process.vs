@@ -1,6 +1,6 @@
 (ns eve.process
   "eve's process primitives (HOST-CONTRACT §5) over ValueScript's: the clock, sleep, and the running thread's identity
-   (vs.thread/worker-id: 0 on the main thread, a mesh worker its id — answered + 1, so no thread is 0). Files
+   (vs.base.thread/worker-id: 0 on the main thread, a mesh worker its id — answered + 1, so no thread is 0). Files
    over the runtime's wasi/path-* arms (file-exists?, create-exclusive!, ensure-parent-dir!). No timer
    thread and no exit hook: the fixed WASI surface has no timer or exit-hook arm, and a mesh's workers are
    a build-time shape, not a runtime spawn; standard input's lines (WASI fd 0).
@@ -10,7 +10,7 @@
    table's realm (FORMAT-DECISIONS §9: told apart from another process's); it is no source for eve.keyring's keys."
   (:refer-clojure :exclude [read-line])
   (:require [clojure.string :as str]
-            [vs.thread :as th]))
+            [vs.base.thread :as th]))
 
 (defn now-ms [] (System/currentTimeMillis))
 (defn thread-id [] (inc (th/worker-id)))

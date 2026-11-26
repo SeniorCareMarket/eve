@@ -3,14 +3,14 @@
    adapter tree, written for this seat. It is not Eve code and not a residence piece.
 
    A VS program is N wasm instances over one shared memory (vs/wasm-threads): instance 0 runs _start, workers
-   enter at vs_worker_loop, and vs.thread/mesh-spawn posts a closure to a worker. An Eve thread here is one
+   enter at vs_worker_loop, and vs.base.thread/mesh-spawn posts a closure to a worker. An Eve thread here is one
    long-lived mesh task: start-threads! posts a wrapper closure that binds *self*, runs the entry under the
    starter's conveyed binding frame, and — on any end, return or throw — sends its starter the exit notice
    before its mailbox is dropped, so a dead thread is never silent.
 
    The heap is SHARED (one slab): a message is the value itself, closures included (ships-closures? true), and a
    binding frame is a value that travels (get-thread-bindings / with-bindings* — core's own conveyance, the
-   machinery vs.thread/thread-future runs on). A mailbox is a VS atom holding a vector — a value stored into an
+   machinery vs.base.thread/thread-future runs on). A mailbox is a VS atom holding a vector — a value stored into an
    atom is held by the runtime, so a message's custody is the atom's, never a raw pointer's — plus one futex
    word in a reserved raw window: send! conjs, bumps the word and notifies it; receive! checks the queue, then
    wait-i32 on the word it just read, so a send between the check and the wait changes the word and the wait
@@ -26,13 +26,13 @@
    The raw memory door is called by its literal mmap/ prefix (prog:mmap/*): spelled through a namespace alias
    the same names compile to trip stubs, and load-i32 / store-i32! ARE the sequential-consistency atomic forms —
    there are no atomic-load-i32 / atomic-store-i32! names."
-  (:require [vs.thread :as th]))
+  (:require [vs.base.thread :as th]))
 
 ;; ---------------------------------------------------------------------------
 ;; The futex window: one reserved raw run. Word 0 is the address counter;
 ;; mailbox `addr` owns the word at +8 + 8*addr. Reserved at namespace load —
 ;; on main, during _start, before any spawn; workers meet the address in the
-;; globals image they adopt (the vs.thread pool-state pattern).
+;; globals image they adopt (the vs.base.thread pool-state pattern).
 
 (def ^:private window (mmap/reserve! 1048576))
 
