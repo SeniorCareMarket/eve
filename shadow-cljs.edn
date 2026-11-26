@@ -43,6 +43,13 @@
    :output-to "target/flat-sister-test/main.js"
    :ns-regexp "eve.flat.sister-test$"}
 
+  ;; eve.bin/lines (THE LINE VIEW) on Node: clojure -M:node-test -m shadow.cljs.devtools.cli compile bin-lines-test
+  ;;   && node target/bin-lines-test/main.js
+  :bin-lines-test
+  {:target :node-test
+   :output-to "target/bin-lines-test/main.js"
+   :ns-regexp "eve.bin-lines-test$"}
+
   ;; flat-all-hosts lane: the flat-abilities smoke on Node
   ;; (see test/eve/runner/flat_smoke_main.cljs)
   :flat-smoke-test

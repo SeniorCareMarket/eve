@@ -208,5 +208,77 @@
               (cond (< x y) -1 (> x y) 1 :else (recur (inc i))))
             (cond (< na nb) -1 (> na nb) 1 :else 0)))))))
 
+;; ── THE LINE VIEW (TATWD, perf-B 2026-11-26): a binary's lines as views of its own bytes ──
+;; Lines end as java.io.BufferedReader's readLine ends them: at \n, at \r\n (one terminator), at a lone \r; the bytes
+;; after the last terminator are the last line; a terminator at the very end adds no empty line. Each line is a
+;; `slice` of b — no copy, the same window and pin as b — so a reduce over the lines allocates one view a line and
+;; nothing else (no string, no seq cell, no lazy thunk). The seq face is a chunked seq of 32 lines a chunk, for the
+;; observers that ask for a seq. Text is decoded by the caller (eve.encoding), never here: bytes stay the binary.
+
+(defn- line-at
+  "The line of b spanning absolute offsets [s, e): a view sharing b's window and pin."
+  [b s e]
+  (Bin. (field b c) (field b sio) (field b blk) s (- e s) (field b pin)))
+
+(defn- line-end
+  "The absolute offset of the first terminator byte (\\n or \\r) at or after i, or lim."
+  [b i lim]
+  (loop [i i]
+    (if (< i lim)
+      (let [u (run-u8 b i)] (if (or (== u 10) (== u 13)) i (recur (inc i))))
+      lim)))
+
+(defn- line-next
+  "The absolute offset just past the terminator at t (< lim): \\r\\n is one terminator."
+  [b t lim]
+  (if (and (== (run-u8 b t) 13) (< (inc t) lim) (== (run-u8 b (inc t)) 10)) (+ t 2) (inc t)))
+
+(defn- reduce-lines
+  "f over b's lines from init; a reduced answer ends the walk with its value."
+  [b f init]
+  (let [lim (+ (field b off) (field b n))]
+    (loop [s (field b off) acc init]
+      (if (< s lim)
+        (let [t (line-end b s lim)
+              r (f acc (line-at b s t))]
+          (cond (reduced? r) @r
+                (< t lim) (recur (line-next b t lim) r)
+                :else r))
+        acc))))
+
+(defn- lines-seq
+  "The lines of b from absolute offset s as a chunked seq, 32 lines a chunk."
+  [b s lim]
+  (lazy-seq
+    (when (< s lim)
+      (let [cb (chunk-buffer 32)
+            s2 (loop [s s k 0]
+                 (if (and (< s lim) (< k 32))
+                   (let [t (line-end b s lim)]
+                     (chunk-append cb (line-at b s t))
+                     (recur (if (< t lim) (line-next b t lim) lim) (inc k)))
+                   s))]
+        (chunk-cons (chunk cb) (lines-seq b s2 lim))))))
+
+(eve/host-deftype Lines [b]
+  clojure.lang.IReduce
+  (reduce [_ f]
+    (let [lim (+ (field b off) (field b n)) s (field b off)]
+      (if (< s lim)
+        (let [t (line-end b s lim)]
+          (if (< t lim)
+            (reduce-lines (slice b (- (line-next b t lim) (field b off))) f (line-at b s t))
+            (line-at b s t)))
+        (f))))
+  (reduce [_ f init] (reduce-lines b f init))
+  clojure.lang.Seqable
+  (seq [_] (seq (lines-seq b (field b off) (+ (field b off) (field b n))))))
+
+(defn lines
+  "The lines of binary b, each a binary viewing b's own bytes (no copy). `reduce` / `transduce` walk b once, one view a
+   line; `seq` answers 32 lines a chunk. Terminators as java.io.BufferedReader's readLine: \\n, \\r\\n, a lone \\r."
+  [b]
+  (Lines. b))
+
 ;; the slot eve.codec and eve.flat.chunk read (they load below this namespace)
 (ser/register-bin! {:bin? bin? :view-bytes view-bytes :scalar-bytes scalar-bytes :run run})
