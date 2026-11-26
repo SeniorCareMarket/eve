@@ -217,62 +217,78 @@
 
 (defn- line-at
   "The line of b spanning absolute offsets [s, e): a view sharing b's window and pin."
-  [b s e]
-  (Bin. (field b c) (field b sio) (field b blk) s (- e s) (field b pin)))
+  [^Bin b s e]
+  (Bin. (field ^Bin b c) (field ^Bin b sio) (field ^Bin b blk) s (- e s) (field ^Bin b pin)))
+
+;; The scan reads b's run ONCE (`run`: a chunk view's own host bytes, no copy; a domain block's bytes copied once) and
+;; walks the host byte array directly — no per-byte call through the window (run-u8's chunk-or-block branch). A line is
+;; still a slice of b itself, so it keeps b's window and pin, whatever the scan read. MEASURED before (JVM, 500,000
+;; lines of ~11.5 B, per-thread allocated bytes): a per-byte run-u8 scan cost 38,793 B and 7.4 us a line.
+
+(defn- u8-at
+  "The unsigned byte at index i of host byte array hb."
+  [#?(:clj ^bytes hb :default hb) #?(:clj ^long i :default i)]
+  (bit-and (aget hb i) 0xFF))
 
 (defn- line-end
-  "The absolute offset of the first terminator byte (\\n or \\r) at or after i, or lim."
-  [b i lim]
-  (loop [i i]
-    (if (< i lim)
-      (let [u (run-u8 b i)] (if (or (== u 10) (== u 13)) i (recur (inc i))))
+  "The run index of the first terminator byte (\\n or \\r) at or after k (k, lim: run indexes), or lim."
+  #?(:clj ^long [^bytes hb ^long k ^long lim]
+     :default [hb k lim])
+  (loop [k k]
+    (if (< k lim)
+      (let [u (u8-at hb k)] (if (or (== u 10) (== u 13)) k (recur (inc k))))
       lim)))
 
 (defn- line-next
-  "The absolute offset just past the terminator at t (< lim): \\r\\n is one terminator."
-  [b t lim]
-  (if (and (== (run-u8 b t) 13) (< (inc t) lim) (== (run-u8 b (inc t)) 10)) (+ t 2) (inc t)))
+  "The run index just past the terminator at t (< lim): \\r\\n is one terminator."
+  #?(:clj ^long [^bytes hb ^long t ^long lim]
+     :default [hb t lim])
+  (if (and (== (u8-at hb t) 13) (< (inc t) lim) (== (u8-at hb (inc t)) 10)) (+ t 2) (inc t)))
 
 (defn- reduce-lines
   "f over b's lines from init; a reduced answer ends the walk with its value."
-  [b f init]
-  (let [lim (+ (field b off) (field b n))]
-    (loop [s (field b off) acc init]
+  [^Bin b f init]
+  (let [r (run b) hb (nth r 0) base (long (nth r 1))
+        lim (+ base (long (field ^Bin b n))) d (- (long (field ^Bin b off)) base)]   ;; d: a run index's offset in b's source
+    (loop [s base acc init]
       (if (< s lim)
-        (let [t (line-end b s lim)
-              r (f acc (line-at b s t))]
-          (cond (reduced? r) @r
-                (< t lim) (recur (line-next b t lim) r)
-                :else r))
+        (let [t (line-end hb s lim)
+              x (f acc (line-at b (+ s d) (+ t d)))]
+          (cond (reduced? x) @x
+                (< t lim) (recur (line-next hb t lim) x)
+                :else x))
         acc))))
 
 (defn- lines-seq
-  "The lines of b from absolute offset s as a chunked seq, 32 lines a chunk."
-  [b s lim]
+  "The lines of b from run index s (of b's run hb; d its offset in b's source) as a chunked seq, 32 lines a chunk."
+  [^Bin b hb d s lim]
   (lazy-seq
     (when (< s lim)
       (let [cb (chunk-buffer 32)
             s2 (loop [s s k 0]
                  (if (and (< s lim) (< k 32))
-                   (let [t (line-end b s lim)]
-                     (chunk-append cb (line-at b s t))
-                     (recur (if (< t lim) (line-next b t lim) lim) (inc k)))
+                   (let [t (line-end hb s lim)]
+                     (chunk-append cb (line-at b (+ s d) (+ t d)))
+                     (recur (if (< t lim) (line-next hb t lim) lim) (inc k)))
                    s))]
-        (chunk-cons (chunk cb) (lines-seq b s2 lim))))))
+        (chunk-cons (chunk cb) (lines-seq b hb d s2 lim))))))
 
 (eve/host-deftype Lines [b]
   clojure.lang.IReduce
   (reduce [_ f]
-    (let [lim (+ (field b off) (field b n)) s (field b off)]
-      (if (< s lim)
-        (let [t (line-end b s lim)]
+    (let [r (run b) hb (nth r 0) base (nth r 1)
+          lim (+ base (field ^Bin b n)) d (- (field ^Bin b off) base)]
+      (if (< base lim)
+        (let [t (line-end hb base lim)]
           (if (< t lim)
-            (reduce-lines (slice b (- (line-next b t lim) (field b off))) f (line-at b s t))
-            (line-at b s t)))
+            (reduce-lines (slice b (- (line-next hb t lim) base)) f (line-at b (+ base d) (+ t d)))
+            (line-at b (+ base d) (+ t d))))
         (f))))
   (reduce [_ f init] (reduce-lines b f init))
   clojure.lang.Seqable
-  (seq [_] (seq (lines-seq b (field b off) (+ (field b off) (field b n))))))
+  (seq [_]
+    (let [r (run b) hb (nth r 0) base (nth r 1)]
+      (seq (lines-seq b hb (- (field ^Bin b off) base) base (+ base (field ^Bin b n)))))))
 
 (defn lines
   "The lines of binary b, each a binary viewing b's own bytes (no copy). `reduce` / `transduce` walk b once, one view a
