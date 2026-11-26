@@ -17,6 +17,7 @@
    VALUES: VS's JS arrays are growable, backed by VS vectors (vs.cljs's array-of; a vector and a Java array read as one too); a plain object is a js.Object box or a map with no
    :vs-type (its keys by name); VS has no undefined (nil); a page error is thrown as a js.<name> error box."
   (:require [eve.dom.core :as core]
+            [eve.dom.headless :as headless]
             [eve.flat-io :as fio]
             [eve.net.bytes :as nb]
             [vs.cljs :as j]
@@ -144,3 +145,36 @@
   []
   (register-class!)
   (core/attach! host (* 64 1024) :vs-bridge))
+
+;; ---------------------------------------------------------------------------------------------------------------
+;; no page: eve.dom.headless in-process
+
+(def ^:private headless? (atom false))
+
+(defn attach-headless!
+  "eve.dom.core over eve.dom.headless's model document, in-process: no page, no bridge. A fresh document each call."
+  []
+  (register-class!)
+  (headless/reset-page!)
+  (reset! headless? true)
+  (core/attach! (assoc host :send (fn [frame] (headless/exec-frame frame))) (* 64 1024) :headless))
+
+(defn headless-pump!
+  "Runs the guest callbacks the model document has filed (its listeners', its animation frames'), until none is left;
+   the count run. Each runs after the frame that filed it returned, as a page's posted call would."
+  []
+  (if-not @headless?
+    0
+    (loop [n 0]
+      (let [cs (headless/take-calls!)]
+        (if (empty? cs)
+          n
+          (do (doseq [[id args] cs] (core/run-callback! id args))
+              (recur (+ n (count cs)))))))))
+
+(defn headless-frame!
+  "Runs the animation frames the program requested on the model document, then their callbacks."
+  []
+  (core/flush!)
+  (headless/tick-animation-frame!)
+  (headless-pump!))
