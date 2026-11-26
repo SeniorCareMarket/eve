@@ -1,7 +1,7 @@
 (ns eve.region
   "eve's regions (eve.mem's IMemRegion and IHostAtomics; HOST-CONTRACT §1-2) over ValueScript's own linear memory. A
    region is its first byte's address, a number: a window of consecutive slab regions no allocator hands out
-   ((mmap/reserve! n)) for a heap region, a file's pages mapped over a fresh window (vs.mmap/map-file!, under
+   ((mmap/reserve! n)) for a heap region, a file's pages mapped over a fresh window (vs.base.region/map-file!, under
    vs-eve-host's doorbell) for an mmap region — the same files eve's other hosts map. eve.slab-io (adapters/slab-io/vs)
    reads and writes them with the program-runtime mmap arms directly; IMemRegion on a number does the same for every
    other caller: plain loads and stores, the seq-cst atomics, memory.atomic.wait32 / notify. The wasm memory is
@@ -10,7 +10,7 @@
    Like eve's JVM region (bb-load-i32), an aligned offset takes the atomic op and an unaligned one a plain load or
    store: the HAMT writes a node's i32 fields at any byte offset, and the atomic arm traps there."
   (:require [eve.mem :as mem]
-            [vs.mmap :as vmm]))
+            [vs.base.region :as vmm]))
 
 (def ^:private sizes (atom {}))   ;; a region's address -> its byte length
 (def ^:private file-backed (atom #{}))   ;; the addresses that are file windows (open-mmap-region), not heap windows
