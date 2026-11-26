@@ -27,7 +27,10 @@
      :object?       x -> is x plain data with string keys (a host's plain object)
      :object-items  x -> its [key value] pairs       :make-object  v -> a host object of [k v] pairs vector v
      :error         [name msg] -> the host error to throw for a page-side error
-     :describe      x -> a short description for a refusal"
+     :describe      x -> a short description for a refusal
+     :call          [f args] -> f called as the page calls it, args a vector (optional; default apply: every
+                    ClojureScript fn is a JavaScript fn, which takes any argument count — a host whose fns are
+                    arity-strict, ValueScript, calls with the leading arguments f takes)"
   (:require [eve.dom.codec :as c]
             [clojure.string :as str]))
 
@@ -421,7 +424,7 @@
     (let [r (c/reader args)
           n (c/r-u32 r)
           xs (vec (repeatedly n #(read-value r false)))]
-      (try (apply f xs)
+      (try ((or (get @(:host st) :call) apply) f xs)
            (catch #?(:clj Throwable :cljs :default :default :default) e
              (println "eve.dom: a callback threw:" (str e))))
       (flush!)))

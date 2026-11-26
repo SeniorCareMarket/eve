@@ -115,7 +115,11 @@
    :object-items object-items
    :make-object (fn [kvs] (j/make-object kvs))
    :error (fn [nm msg] (j/js-error (str "js." nm) msg))
-   :describe (fn [x] (j/-describe x))})
+   :describe (fn [x] (j/-describe x))
+   ;; the page calls a listener with its event, a then with its value …: a VS fn takes the leading arguments it has
+   ;; parameters for (vs.cljs/call-js), as a JavaScript fn ignores the rest. MEASURED before: reagami_counter's
+   ;; #(let [n …]) on-click threw `ArityException: Wrong number of args (1) passed to a fn` at the page's click
+   :call (fn [f args] (j/call-js f args))})
 
 ;; ---------------------------------------------------------------------------------------------------------------
 ;; page events: callbacks and their release
