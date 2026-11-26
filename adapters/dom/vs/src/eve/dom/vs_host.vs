@@ -19,7 +19,7 @@
   (:require [eve.dom.core :as core]
             [eve.dom.headless :as headless]
             [eve.flat-io :as fio]
-            [eve.net.bytes :as nb]
+            [eve.encoding :as enc]
             [vs.cljs :as j]
             [vs.host :as host]
             [clojure.string :as str]))
@@ -27,14 +27,11 @@
 ;; ---------------------------------------------------------------------------------------------------------------
 ;; bytes <-> base64 (the bridge carries text)
 
-(defn- bytes->b64 [b]
-  (let [c (fio/chunk b)]
-    (nb/to-b64 (mapv (fn [i] (fio/u8 c i)) (range (fio/chunk-len c))))))
-
-(defn- b64->bytes [s]
-  (let [bs (nb/from-b64 s) n (count bs) out (byte-array n)]
-    (loop [i 0] (when (< i n) (aset out i (unchecked-byte (nth bs i))) (recur (inc i))))
-    out))
+;; the kernel's base64 rows, one call over the frame's bytes (ValueScript's layering U1b: each frame went through a vector
+;; a byte at a time): a frame's chunk is a binary, whose bytes rt-bin-str hands the row; the answer is eve.encoding's
+;; byte array, as before
+(defn- bytes->b64 [b] (vs.core/rt-b64-encode (vs.core/rt-bin-str (fio/chunk b))))
+(defn- b64->bytes [s] (enc/b64->bytes s))
 
 ;; ---------------------------------------------------------------------------------------------------------------
 ;; proxies
