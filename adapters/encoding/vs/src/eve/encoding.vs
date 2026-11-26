@@ -223,7 +223,24 @@
 ;; adapters declare. Absent (main's codec-slot change fa41a1c98c added the slots to every adapter but this one), a VS
 ;; program's (if e/hex->bytes …) tripped at run time on the unresolved name: `run: form 571 eve.encoding/hex->bytes` in
 ;; seven net tests and three merkle-equality rows (M0, 2026-10-25, MEASURED).
-(def bytes->b64 nil)
-(def b64->bytes nil)
-(def bytes->hex nil)
-(def hex->bytes nil)
+;; FILLED (ValueScript's layering U1b, 2026-11-26): VS has the kernel's own base64 (rt-b64-encode / rt-b64-decode,
+;; eve_page_b64_chunk / eve_b64_decode), so the base64 slots are the kernel's, one call over the run's bytes — a byte
+;; array (byte-array) is a piece the core's `binary` takes, and rt-bin-str hands its bytes to the row. Hex is a table
+;; lookup a byte here. MEASURED before (U1b-BYTE-STRINGS-INVENTORY.md): every slot nil, so eve.net.bytes ran its
+;; portable reference over vectors one byte at a time on VS.
+(def ^:private HEX2 (vec (for [b (range 256)] (str (nth "0123456789abcdef" (quot b 16)) (nth "0123456789abcdef" (mod b 16))))))
+(defn- run-bytes [b] (vs.core/rt-bin-str (binary b)))   ; the byte array's bytes, as the kernel rows read them
+(defn bytes->b64 [b] (vs.core/rt-b64-encode (run-bytes b)))
+(defn b64->bytes [s]
+  (let [bs (vs.core/rt-b64-decode s) n (.-length bs) out (byte-array n)]
+    (loop [i 0] (when (< i n) (aset out i (unchecked-byte (.charCodeAt bs i))) (recur (inc i))))
+    out))
+(defn bytes->hex [b]
+  (let [n (alength b)]
+    (loop [i 0 acc (transient [])]
+      (if (< i n) (recur (inc i) (conj! acc (nth HEX2 (bit-and (aget b i) 0xFF)))) (apply str (persistent! acc))))))
+(defn hex->bytes [h]
+  (let [v (fn [c] (cond (and (>= c 48) (<= c 57)) (- c 48) (and (>= c 97) (<= c 102)) (- c 87) (and (>= c 65) (<= c 70)) (- c 55) :else 0))
+        n (quot (.-length h) 2) out (byte-array n)]
+    (loop [i 0] (when (< i n) (aset out i (unchecked-byte (+ (* 16 (v (.charCodeAt h (* 2 i)))) (v (.charCodeAt h (inc (* 2 i))))))) (recur (inc i))))
+    out))

@@ -5,7 +5,7 @@
   (:require [eve.net.bigops :as bo]
             [eve.net.edwards :as edw]
             [eve.net.portable-crypto :as p]
-            [vs.net.bytes :as vb]))
+            [vs.base.net.bytes :as vb]))
 
 (defn sha256 "the 32-byte digest" [bs] (vb/ints (vs.core/rt-crypto-sha256 (vb/of-ints bs))))
 (defn hmac-sha256
