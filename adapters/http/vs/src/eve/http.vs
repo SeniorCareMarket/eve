@@ -8,19 +8,14 @@
    :as :b64 answers the response body as base64, :as :bytes as a byte array (eve.host's, which eve.codec reads);
    otherwise bodies are UTF-8 text. Header names are answered lower case. A transport failure, or a host that serves
    no fetch, answers {:error message}. request-all keeps up to vs.host/FETCH-ALL-LIMIT requests in flight at once."
-  (:refer-clojure :exclude [aget aset alength byte-array unchecked-byte])
   (:require [clojure.string :as str]
-            [eve.host :refer [aget aset alength byte-array unchecked-byte]]
-            [eve.net.bytes :as nb]
+            [eve.encoding :as enc]
             [vs.host :as host]))
 
-(defn- array->b64 "base64 text of a byte array's bytes" [a]
-  (nb/to-b64 (mapv (fn [i] (bit-and (aget a i) 0xFF)) (range (alength a)))))
-
-(defn- b64->array "the byte array of base64 text" [s]
-  (let [bs (nb/from-b64 s) n (count bs) out (byte-array n)]
-    (loop [i 0] (when (< i n) (aset out i (unchecked-byte (nth bs i))) (recur (inc i))))
-    out))
+;; eve.encoding's codec slots are the kernel's base64 rows (one call over the run's bytes; ValueScript's layering U1b —
+;; these went through a vector a byte at a time)
+(defn- array->b64 "base64 text of a byte array's bytes" [a] (enc/bytes->b64 a))
+(defn- b64->array "the byte array of base64 text" [s] (enc/b64->bytes s))
 
 (defn- init
   "vs.host/fetch's init of an eve.net request: a byte-array body goes as base64, a :bytes answer is asked as base64"

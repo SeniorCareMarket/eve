@@ -12,7 +12,6 @@
    :headers :body :body-as}: :body text, or with :body-as :b64 the base64 of the bytes to send (eve.net.run's
    conventions). A handler that throws answers 500."
   (:require [clojure.string :as str]
-            [eve.net.bytes :as nb]
             [vs.base.http-server :as server]))
 
 (defn- request
@@ -24,7 +23,9 @@
      :url (if q (str (:uri req) "?" q) (:uri req))
      :headers (into {} (map (fn [[k v]] [(str/lower-case (name k)) v]) (:headers req)))
      :body (if b64 "" (or (:body req) ""))
-     :body-b64 (or b64 (nb/to-b64 (nb/utf8 (or (:body req) ""))))}))
+     ;; a string's bytes are its UTF-8, so the kernel's base64 row reads them in one call (ValueScript's layering U1b:
+     ;; this was UTF-8 to a vector, then base64 a byte at a time, on every request)
+     :body-b64 (or b64 (vs.core/rt-b64-encode (or (:body req) "")))}))
 
 (defn- response
   "vs.host's response map of eve's"
