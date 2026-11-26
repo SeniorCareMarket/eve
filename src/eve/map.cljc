@@ -37,6 +37,7 @@
    [eve.type-readers]
    [eve.vec :as evec]
    [eve.codec :as codec]
+   [eve.bin :as bin]
    [eve.digest :as dg]
    #?(:jolt [jolt.scheme :as scheme])
    #?(:jolt [eve.region :as region])))
@@ -144,6 +145,22 @@
   "Deserialize value bytes (platform-specific). Takes an explicit sio on CLJ."
   [val-bytes sio]
   (codec/decode sio val-bytes))
+
+;; A map's value that is a binary (tag 0x28) reads as an eve binary viewing its run in the node — no copy (eve.bin,
+;; doc/flat/BIN.md): the read's pin (eve.view) or the swap that read it keeps the node's version alive, and a value
+;; that escapes is copied once (eve.bin/own). nil for any other value, which the caller decodes from its bytes.
+(defn- bin-at
+  [sio off field-off vl]
+  (when (and (>= vl 4)
+             (== 0x28 (alloc/node-u8 sio off (+ field-off 2)))
+             (== 0xEE (alloc/node-u8 sio off field-off))
+             (== 0xDB (alloc/node-u8 sio off (+ field-off 1))))
+    (loop [i (+ field-off 3) v 0 sh 0]
+      (let [x (alloc/node-u8 sio off i)
+            v (bit-or v (bit-shift-left (bit-and x 0x7F) sh))]
+        (if (< x 0x80)
+          (bin/slab-view sio off (inc i) v)
+          (recur (inc i) v (+ sh 7)))))))
 
 (defn- default-sio
   "The slab I/O a constructor given none allocates in: the running swap!'s
@@ -574,9 +591,9 @@
                         (if (and (== kl (bytes-length kb))
                                  (alloc/node-bytes-equal? sio off (+ pos 4) kb))
                           (let [vo (+ pos 4 kl)
-                                vl (alloc/node-i32 sio off vo)
-                                vb (alloc/node-bytes sio off (+ vo 4) vl)]
-                            (deserialize-value-bytes vb sio))
+                                vl (alloc/node-i32 sio off vo)]
+                            (or (bin-at sio off (+ vo 4) vl)
+                                (deserialize-value-bytes (alloc/node-bytes sio off (+ vo 4) vl) sio)))
                           not-found))))
 
                   :else not-found))
@@ -593,9 +610,9 @@
                           (if (and (== kl (bytes-length kb))
                                    (alloc/node-bytes-equal? sio off (+ pos 4) kb))
                             (let [vo (+ pos 4 kl)
-                                  vl (alloc/node-i32 sio off vo)
-                                  vb (alloc/node-bytes sio off (+ vo 4) vl)]
-                              (deserialize-value-bytes vb sio))
+                                  vl (alloc/node-i32 sio off vo)]
+                              (or (bin-at sio off (+ vo 4) vl)
+                                  (deserialize-value-bytes (alloc/node-bytes sio off (+ vo 4) vl) sio)))
                             (let [vo (+ pos 4 kl)]
                               (recur (inc i) (+ vo 4 (alloc/node-i32 sio off vo)))))))))))
 
@@ -656,9 +673,10 @@
                           (if (and (== kl (bytes-length kb))
                                    (alloc/parts-bytes-equal? arr rgn (+ base pos 4) kb))
                             (let [vo (+ pos 4 kl)
-                                  vl (alloc/parts-i32 arr rgn base vo)
-                                  vb (alloc/parts-bytes arr rgn (+ base vo 4) vl)]
-                              (deserialize-value-bytes vb sio))
+                                  vl (alloc/parts-i32 arr rgn base vo)]
+                              (or (when (and (>= vl 4) (== 0x28 (alloc/parts-u8 arr rgn base (+ vo 6))))
+                                      (bin-at sio off (+ vo 4) vl))
+                                  (deserialize-value-bytes (alloc/parts-bytes arr rgn (+ base vo 4) vl) sio)))
                             not-found))))
 
                     :else not-found))
@@ -675,9 +693,10 @@
                             (if (and (== kl (bytes-length kb))
                                      (alloc/parts-bytes-equal? arr rgn (+ base pos 4) kb))
                               (let [vo (+ pos 4 kl)
-                                    vl (alloc/parts-i32 arr rgn base vo)
-                                    vb (alloc/parts-bytes arr rgn (+ base vo 4) vl)]
-                                (deserialize-value-bytes vb sio))
+                                    vl (alloc/parts-i32 arr rgn base vo)]
+                                (or (when (and (>= vl 4) (== 0x28 (alloc/parts-u8 arr rgn base (+ vo 6))))
+                                      (bin-at sio off (+ vo 4) vl))
+                                    (deserialize-value-bytes (alloc/parts-bytes arr rgn (+ base vo 4) vl) sio)))
                               (let [vo (+ pos 4 kl)]
                                 (recur (inc i) (+ vo 4 (alloc/parts-i32 arr rgn base vo)))))))))))
 

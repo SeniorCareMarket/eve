@@ -72,6 +72,39 @@
 ;; Typed array tag — stores a JS typed array as a flat byte blob.
 ;; Format: [0xEE][0xDB][0x1B][subtype:u8][byte-length:u32][raw bytes...] = 8 + N bytes
 (def ^:const FAST_TAG_TYPED_ARRAY 0x1B)
+;; Bytes tag — a run of bytes: the one binary scalar (doc/flat/FORMAT-V1.md §3's
+;; bytes node, with the magic in front). The same bytes in a slab block, an
+;; atom's value, a map key, the digest's input, a flat chunk (less the magic) and
+;; a file: a binary value moves between them by copy, never by re-encoding.
+;; Format: [0xEE][0xDB][0x28][len: unsigned LEB128 varint][raw bytes...]
+;; 0x1B subtype 1 (Uint8Array) written before this tag still reads, as bytes.
+(def ^:const FAST_TAG_BYTES 0x28)
+
+;; THE BINARY SLOT (eve.bin, doc/flat/BIN.md): a 0x28 scalar reads back as an eve binary — a view of its run where the
+;; reader holds it, never a copy — and an eve binary writes as the 0x28 scalar. eve.bin owns the type and loads ABOVE the
+;; codec and the flat reader (eve.deftype's macros load them), so they reach it here; eve.bin fills the slot at its load.
+;; {:bin? (fn [x]) :view-bytes (fn [host-bytes off n] → a binary viewing them) :scalar-bytes (fn [b] → [EE DB 28 …])
+;;  :run (fn [b] → [host-bytes off] of its run)}
+(defonce ^:private bin-impl (atom nil))
+
+(defn register-bin! [m] (reset! bin-impl m))
+
+(defn bin?
+  "x is an eve binary (false before eve.bin loads: no value is one then)."
+  [x]
+  (let [m @bin-impl] (and (some? m) (boolean ((:bin? m) x)))))
+
+(defn bin-view
+  "The eve binary of the n bytes at off of host byte array bs: a view, no copy."
+  [bs off n]
+  (let [m @bin-impl]
+    (when (nil? m)
+      (throw (ex-info "eve: a binary (tag 0x28) is read as eve.bin's value: require eve.bin" {:type :eve/no-bin})))
+    ((:view-bytes m) bs off n)))
+
+(defn bin-scalar-bytes "Binary b's eve bytes [EE DB 28][len varint][run]." [b] ((:scalar-bytes @bin-impl) b))
+
+(defn bin-run "[host-bytes off] of binary b's run." [b] ((:run @bin-impl) b))
 
 ;; EveArray tag — SAB pointer to a live eve-array (zero-copy wrapper).
 ;; Format: [0xEE][0xDB][0x1C][block-offset:i32] = 7 bytes.

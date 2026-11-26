@@ -309,6 +309,66 @@
       (rw form)
       form)))
 
+;; ---------- R8 ----------
+;; Protocols squint core names but gives no method keys. A deftype
+;; spec naming a protocol bare (cljs.core's names — ICounted,
+;; IIndexed, ...) compiles to a marker on squint_core.<P> and method
+;; keys squint_core.<P>__<m>; squint 0.16.213's core exports the
+;; marker for IVector and IReduce but NO IVector__assoc_n /
+;; IReduce__reduce, so the emit falls back to the bare, undefined
+;; JS names (measured: `ConcatBatch.prototype[IVector__assoc_n]` —
+;; ReferenceError at load of eve/flat/freeze.mjs; the ClojureScript
+;; arm of freeze.cljc spells the two bare). eve.core's squint face
+;; defprotocols both (adapters/coll/squint, which exports the keys,
+;; as eve/vec.cljc's ecore/IVector already compiles to
+;; eve_DOT_core.IVector__assoc_n). Route the bare names, inside type
+;; forms only, to eve.core's, and require eve.core in the staged ns
+;; when one fired and it is not already required. Names the file
+;; itself defines or refers are left.
+(def core-gap-protocols #{'IVector 'IReduce})
+
+(defn- map-type-forms
+  "f applied to every type form (head in type-heads) at any depth outside
+   quote — freeze.cljc wraps its deftypes in (do ...)."
+  [f form]
+  (letfn [(walk1 [x]
+            (cond
+              (and (seq? x) (#{'quote 'syntax-quote} (first x))) x
+              (and (seq? x) (contains? type-heads (first x))) (f x)
+              (seq? x) (with-meta (apply list (map walk1 x)) (meta x))
+              (vector? x) (with-meta (mapv walk1 x) (meta x))
+              (map? x) (with-meta (into {} (map (fn [[k v]] [(walk1 k) (walk1 v)])) x) (meta x))
+              (set? x) (with-meta (into #{} (map walk1) x) (meta x))
+              :else x))]
+    (walk1 form)))
+
+(defn- gap-protocol? [x locals]
+  (and (symbol? x) (contains? core-gap-protocols x) (not (contains? locals x))))
+
+(defn gap-protocol-hit? [forms locals]
+  (let [hit (atom false)]
+    (doseq [form forms]
+      (map-type-forms
+       (fn [t] (walk/postwalk (fn [x] (when (gap-protocol? x locals) (reset! hit true)) x) t) t)
+       form))
+    @hit))
+
+(defn route-gap-protocols [form locals]
+  (map-type-forms
+   (fn [t]
+     (letfn [(rw [x]
+               (cond
+                 (gap-protocol? x locals) (with-meta (symbol "eve.core" (str x)) (meta x))
+                 (seq? x) (if (#{'quote 'syntax-quote} (first x))
+                            x
+                            (with-meta (apply list (map rw x)) (meta x)))
+                 (vector? x) (with-meta (mapv rw x) (meta x))
+                 (map? x) (with-meta (into {} (map (fn [[k v]] [(rw k) (rw v)])) x) (meta x))
+                 (set? x) (with-meta (into #{} (map rw) x) (meta x))
+                 :else x))]
+       (rw t)))
+   form))
+
 ;; ---------- R4 ----------
 (defn self-macros [forms]
   (into #{}
@@ -323,6 +383,146 @@
                 (when (and (seq? f) (contains? macros (first f)))
                   (first f))))
         forms))
+
+;; R4b: expand a same-file macro call at stage time when the macro
+;; reads only the file's own quoted-literal defs (eve.alpha's and
+;; eve.thread's api-defs over their quoted api tables). The self
+;; :require-macros of R4 makes squint load the WHOLE namespace into
+;; its macro interpreter, and with it every namespace it requires —
+;; eve.alpha requires eve.flat.freeze (9fd57f8), whose deftypes name
+;; ClojureScript protocols (ICounted, IIndexed, ...) the macro
+;; interpreter does not have: 'Protocol not found: ICounted' at the
+;; ns form, and every file loading eve.alpha fails with it. The
+;; expansion is the same forms squint would have spliced; a macro
+;; that does not evaluate here (it reads more than quoted defs), or
+;; whose expansion fails or names a symbol of the sandbox namespace
+;; (syntax quote), keeps R4's self-require.
+(defn quoted-def? [f]
+  (and (seq? f) (= 'def (first f)) (symbol? (second f))
+       (let [v (last f)] (and (seq? v) (= 'quote (first v))))))
+
+(defn expand-self-calls [forms macros]
+  (let [sb (gensym "squint-stage-r4b-")
+        sbns (create-ns sb)
+        mine? (fn [x] (and (symbol? x) (= (str sb) (namespace x))))
+        _ (binding [*ns* sbns]
+            (refer-clojure)
+            (doseq [f forms
+                    :when (or (quoted-def? f)
+                              (and (seq? f) (= 'defmacro (first f))
+                                   (contains? macros (second f))))]
+              (try (eval f) (catch Exception _ nil))))
+        expand (fn [f]
+                 (if (and (seq? f) (contains? macros (first f))
+                          (ns-resolve sbns (first f)))
+                   (let [e (try (binding [*ns* sbns] (macroexpand-1 f))
+                                (catch Exception _ f))]
+                     (if (some mine? (tree-seq coll? seq e)) f e))
+                   f))
+        out (mapv expand forms)]
+    (remove-ns sb)
+    out))
+
+;; ---------- R4c ----------
+;; Forwarding macros of a namespace squint's macro loader cannot
+;; load. A .cljc that defines a macro is loaded into squint's SCI
+;; macro interpreter whenever another file requires it — whole, with
+;; every namespace it requires (measured on 0.16.213: a required
+;; .cljc without defmacro is not loaded; with one it is, even when
+;; the requirer calls no macro). eve.alpha requires eve.flat.freeze
+;; (9fd57f8), whose deftypes name ClojureScript protocols (ICounted,
+;; IIndexed, ...) the interpreter does not have: 'Protocol not
+;; found: ICounted' (loading eve/alpha.cljc), and every file that
+;; requires eve.alpha fails. eve.alpha's macros only forward (its
+;; api-defs is expanded by R4b): the staged eve.alpha drops its
+;; defmacros, so it is compiled and never macro-loaded, and its
+;; callers' heads are rewritten to the forms the macros return —
+;; deftype/extend-type to eve.deftype's macros, ($ body...) to
+;; (eve.atom/$* (fn [] body...)), the function the macro calls.
+(def forward-macros
+  '{eve.alpha {deftype [:head eve.deftype/deftype]
+               extend-type [:head eve.deftype/eve-extend-type]
+               $ [:thunk eve.atom/$*]}})
+
+(defn- spec-ns [spec] (when (and (vector? spec) (symbol? (first spec))) (first spec)))
+
+(defn- spec-opts [spec] (apply hash-map (rest spec)))
+
+(defn r4c-file [forms]
+  (let [nsidx (first (keep-indexed (fn [i f] (when (and (seq? f) (= 'ns (first f))) i)) forms))
+        nsform (when nsidx (nth forms nsidx))
+        own (when nsform (second nsform))]
+    (cond
+      (nil? nsform) forms
+      ;; the forwarding namespace itself: its own calls expanded (R4b),
+      ;; then no defmacro left
+      (contains? forward-macros own)
+      (let [expanded (expand-self-calls forms (self-macros forms))]
+        (if (seq (self-macro-calls (remove #(and (seq? %) (= 'defmacro (first %))) expanded)
+                                   (self-macros forms)))
+          forms ; a call R4b could not expand: leave the file to R4
+          (vec (remove #(and (seq? %) (= 'defmacro (first %))) expanded))))
+      :else
+      (let [specs (for [c (drop 2 nsform)
+                        :when (and (seq? c) (#{:require :require-macros} (first c)))
+                        spec (rest c)
+                        :let [n (spec-ns spec)]
+                        :when (contains? forward-macros n)]
+                    [n (first c) (spec-opts spec)])
+            heads (into {}
+                        (mapcat (fn [[n _ opts]]
+                                  (let [tbl (forward-macros n)]
+                                    (concat
+                                     (when-let [a (:as opts)]
+                                       (for [[m v] tbl] [(symbol (str a) (str m)) v]))
+                                     (for [m (:refer opts) :when (contains? tbl m)] [m (tbl m)])))))
+                        specs)]
+        (if (empty? heads)
+          forms
+          (let [fired (atom #{})
+                rw (fn rw [x]
+                     (cond
+                       (and (seq? x) (= 'quote (first x))) x
+                       (and (seq? x) (contains? heads (first x)))
+                       (let [[kind target] (heads (first x))
+                             args (map rw (rest x))]
+                         (swap! fired conj (symbol (namespace target)))
+                         (case kind
+                           :head (apply list (with-meta target (meta (first x))) args)
+                           :thunk (list target (apply list 'fn [] args))))
+                       (seq? x) (with-meta (apply list (map rw x)) (meta x))
+                       (vector? x) (with-meta (mapv rw x) (meta x))
+                       (map? x) (with-meta (into {} (map (fn [[k v]] [(rw k) (rw v)])) x) (meta x))
+                       (set? x) (with-meta (into #{} (map rw) x) (meta x))
+                       :else x))
+                body (vec (map-indexed (fn [i f] (if (= i nsidx) f (rw f))) forms))
+                fwd (set (mapcat (comp keys forward-macros) (keys forward-macros)))
+                fix-spec (fn [spec]
+                           (if (contains? forward-macros (spec-ns spec))
+                             (let [opts (spec-opts spec)
+                                   refer (when (:refer opts) (vec (remove fwd (:refer opts))))
+                                   opts (if (seq refer) (assoc opts :refer refer) (dissoc opts :refer))]
+                               (into [(first spec)] (mapcat identity opts)))
+                             spec))
+                clauses (keep (fn [c]
+                                (cond
+                                  (and (seq? c) (= :require-macros (first c)))
+                                  (let [ss (keep (fn [spec]
+                                                   (if (contains? forward-macros (spec-ns spec))
+                                                     nil
+                                                     spec))
+                                                 (rest c))]
+                                    (when (seq ss) (apply list :require-macros ss)))
+                                  (and (seq? c) (= :require (first c)))
+                                  (apply list :require (map fix-spec (rest c)))
+                                  :else c))
+                              (drop 2 nsform))
+                required (set (for [c clauses :when (and (seq? c) (= :require (first c)))
+                                    spec (rest c) :let [n (spec-ns spec)] :when n] n))
+                nsform2 (apply list 'ns own clauses)
+                nsform3 (reduce (fn [nf t] (if (contains? required t) nf (add-require nf [t])))
+                                nsform2 @fired)]
+            (assoc body nsidx (with-meta nsform3 (meta nsform)))))))))
 
 ;; ---------- R5 ----------
 ;; ---------- R7 ----------
@@ -463,7 +663,10 @@
   (let [resolved (mapv (fn [f]
                          (let [r (resolve-ns-rcs f)]
                            (if (identical? r no-branch) nil r)))
-                       forms)]
+                       forms)
+        ;; R4c: callers of forwarding macros rewritten (the forwarding
+        ;; namespace's own defmacros drop after R4b, in transform-file*)
+        resolved (r4c-file resolved)]
     (transform-file* resolved (not= resolved forms))))
 
 (defn transform-file* [forms r5b-changed?]
@@ -474,16 +677,21 @@
         poison (when nsform (poison-map nsform))
         locals (into (defined-symbols forms) (referred-symbols nsform))
         macros (self-macros forms)
+        forms0 forms
+        forms (if (seq macros) (expand-self-calls forms macros) forms)
+        r4b-changed (not= forms0 forms)
         calls (self-macro-calls (remove #(and (seq? %) (= 'defmacro (first %))) forms) macros)
-        need-core (and (gap-hit? forms locals)
+        need-core (and (or (gap-hit? forms locals)
+                           (gap-protocol-hit? forms locals))
                        (not (requires-eve-core? nsform)))
         has-type-form (boolean (some (fn [f] (and (seq? f) (contains? type-heads (first f)))) forms))]
-    (when (or (seq poison) need-core (seq calls) has-type-form r5-changed r5b-changed?)
+    (when (or (seq poison) need-core (seq calls) has-type-form r5-changed r5b-changed? r4b-changed)
       (let [forms2 (mapv (fn [f]
                            (cond-> f
                              (seq poison) (qualify-heads poison)
                              true (route-gap-heads locals)
                              true (route-value-symbols locals)
+                             true (route-gap-protocols locals)
                              true (repair-fn-literals)
                              true (fix-empty-lists)))
                          (assoc forms nsidx nsform))

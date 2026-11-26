@@ -29,6 +29,7 @@
                        [eve.deftype-proto.vocab :as dtv]])
             #?@(:cljr [[eve.types :as etypes]
                        [eve.deftype-proto.vocab :as dtv]])
+            [eve.deftype-proto.serialize :as ser]
             [eve.flat.source :as source]
             ;; every read and write of a chunk's bytes (doc/flat/FLAT-IO.md):
             ;; the byte layer that stood in this file moved there (flat lanes U2a)
@@ -271,8 +272,9 @@
   (let [t (fio/u8 b i)]
     (cond
       (== t 0x00) nil
+      ;; a run of bytes: an eve binary viewing it in the chunk — no copy (eve.bin)
       (== t 0x28) (let [[n p] (fio/varint b (inc i))]
-                    (bytes-range (fio/chunk-bytes b) p (+ p n)))
+                    (ser/bin-view (fio/chunk-bytes b) p n))
       :else (let [n (scalar-len b i)
                   bs (enc/make-bytes (+ 2 n))]
               (enc/arraycopy MAGIC 0 bs 0 2)
@@ -484,6 +486,9 @@
               (flat-handle? v) (-rep v)
               (some? nom) nom
               (host-bytes? v) (BytesVal. v)
+              ;; an eve binary (eve.bin): its run, as the bytes node of §3 (copied once only if it views a slab block)
+              (ser/bin? v) (BytesVal. (let [r (ser/bin-run v) bs (nth r 0) o (nth r 1) n (count v)]
+                                        (if (and (zero? o) (== n (byte-len bs))) bs (bytes-range bs o (+ o n)))))
               ;; a host object array (an eve array's flat form, made outside
               ;; every atom): its elements, as a vector
               (host-object-array? v) (mapv to-rep v)
