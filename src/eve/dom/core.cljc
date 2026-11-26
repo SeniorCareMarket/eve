@@ -169,7 +169,9 @@
     (nil? v) (c/u8! w c/T-NULL)
     (true? v) (c/u8! w c/T-TRUE)
     (false? v) (c/u8! w c/T-FALSE)
-    (number? v) (do (c/u8! w c/T-NUM) (c/f64! w v))
+    ;; a page number is a double: a host's exact ones (a VS ratio, 745/2 from Clojure's /) cross as their double.
+    ;; MEASURED before (VS's inspect/dashboard.vs on eve.dom): `ClassCastException 745/2` at the frame's f64
+    (number? v) (do (c/u8! w c/T-NUM) (c/f64! w (double v)))
     (string? v) (do (c/u8! w c/T-STR) (c/str! w v))
     :else
     (if-let [m (meta-of v)]
