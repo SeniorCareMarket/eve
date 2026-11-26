@@ -45,6 +45,7 @@
    :range-next (volatile! 0) :range-end (volatile! 0)
    :win (volatile! nil) :doc (volatile! nil)
    :raf (volatile! []) :raf-next (volatile! 0) :raf-scheduled (volatile! false) :last-undef (volatile! false)
+   :objs (volatile! {})
    :stats (volatile! {:sync 0 :frames 0 :ops 0 :page-errors 0})})
 
 (defn- host [k] (or (get @(:host st) k) (throw (ex-info (str "eve.dom: no host " k " (eve.dom.core/attach! not called)") {}))))
@@ -311,6 +312,18 @@
 
 (defn- void-key [m k] (str @(:type m) "|" k))
 
+;; THE PIPELINED CALL: a call of a method that answered a page object (not a DOM node: those answer null too —
+;; querySelector) is queued under a handle the guest allocates (OP-CALLAS, as createElement's), its proxy given the type
+;; the first answer named — so a chain of such calls (d3's select … transition … duration … attr) crosses in ONE frame
+;; and the page runs it in one task. Keyed by type, method and argument count (d3's attr with one argument reads,
+;; with two answers the transition). MEASURED before (VS's reagami_counter, whose d3 lives on the page): transition and
+;; duration were round trips 5-10 ms apart, the page's animation frame between them started the transition, and d3
+;; threw `too late; already running` — the click's handler stopped before its confetti
+(def ^:private node-type
+  #"(Element|Document|DocumentFragment|^Text|^Comment|^CDATASection|^Window|NodeList|HTMLCollection|^Attr)$")
+
+(defn- objs-key [m k args] (str @(:type m) "|" k "|" (count args)))
+
 (defn known-method? "Was property k of m's type read as a method before?" [m k] (contains? @(:known st) (void-key m k)))
 
 (defn call-method
@@ -336,6 +349,15 @@
         (end-queued-op!)
         (nth args (get returns-arg k)))
 
+      (contains? @(:objs st) (objs-key m k args))
+      (let [rh (next-handle!)
+            ty (get @(:objs st) (objs-key m k args))
+            w (begin-op! c/OP-CALLAS)]
+        (c/i32! w rh) (c/i32! w (:h m)) (c/str! w k)
+        (try (write-args w args ok? where) (catch #?(:clj Throwable :cljs :default :default :default) e (abort-op! e)))
+        (end-queued-op!)
+        (proxy-for rh 0 ty))
+
       (contains? @(:void st) (void-key m k))
       (let [w (begin-op! c/OP-CALLQ)]
         (c/i32! w (:h m)) (c/str! w k)
@@ -351,6 +373,9 @@
           ;; the reply's tag, not the host's value: a host with no undefined (VS) learns the same voids
           (when (and @(:last-undef st) (re-find void-learning @(:type m)))
             (vswap! (:void st) conj (void-key m k)))
+          (when-let [vm (meta-of v)]
+            (when (and (= 0 (:kind vm)) (seq @(:type vm)) (not (re-find node-type @(:type vm))))
+              (vswap! (:objs st) assoc (objs-key m k args) @(:type vm))))
           v)))))
 
 (defn get-prop

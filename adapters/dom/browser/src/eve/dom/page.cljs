@@ -7,7 +7,7 @@
                                        callbacks the frame's stubs post to)
      eveDom.setSender(guest, f)      -> f(msg) posts a stub's call (msg.op \"cb\": msg.cb, msg.args an ArrayBuffer of its
                                        argument frame) or release (\"rel\": msg.cb, msg.gen) to that guest"
-  (:require [eve.dom.screen :as screen]))
+  (:require [eve.dom.exec :as screen]))
 
 (defn ^:export execFrame [bytes guest] (screen/exec-frame bytes guest))
 
