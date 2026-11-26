@@ -65,7 +65,7 @@
 
 (defn- run-u8
   "The unsigned byte at absolute offset i of b's source."
-  [b i]
+  [^Bin b i]
   (let [c (field b c)]
     (if (some? c)
       (fio/u8 c i)
@@ -73,7 +73,7 @@
 
 (defn ubyte
   "The byte at index i of binary b, unsigned 0..255 (`nth` reads it signed)."
-  [b i]
+  [^Bin b i]
   (if (and (integer? i) (<= 0 i) (< i (field b n)))
     (run-u8 b (+ (field b off) i))
     (enc/throw-index-out-of-bounds (str "Index " i " out of bounds for a binary of " (field b n) " bytes"))))
@@ -98,16 +98,16 @@
 (defn slab-view?
   "b is a binary viewing a domain's block (not a chunk)."
   [b]
-  (and (bin? b) (nil? (field b c))))
+  (and (bin? b) (nil? (field ^Bin b c))))
 
 (defn pin-of
   "The read's cell b holds, or nil."
-  [b]
+  [^Bin b]
   (field b pin))
 
 (defn pinned
   "b holding the read's cell (eve.view), so the block it views is reclaimed after no reader; a chunk view as it is."
-  [b cell]
+  [^Bin b cell]
   (if (slab-view? b) (Bin. nil (field b sio) (field b blk) (field b off) (field b n) cell) b))
 
 (def ^:private host-bytes-type
@@ -125,39 +125,39 @@
 (defn ->bytes
   "A fresh host byte array of binary b's bytes (the edge out: one copy). A chunk whose bytes are not the host's byte
    array (ValueScript's chunk is a B1 binary) is read through flat-io, byte by byte."
-  [b]
+  [^Bin b]
   (let [n (field b n) off (field b off) c (field b c)]
     (if (some? c)
       (let [hb (fio/chunk-bytes c)]
         (if (host-bytes? hb)
           (copy-run hb off n)
-          (let [out (enc/make-bytes n)]
+          (let [#?(:clj ^bytes out :default out) (enc/make-bytes n)]
             (loop [i 0] (when (< i n) (aset out i (unchecked-byte (fio/u8 c (+ off i)))) (recur (inc i))))
             out)))
       (alloc/node-bytes (field b sio) (field b blk) off n))))
 
 (defn of-bytes
   "The binary of host byte array bs's bytes (the edge in: one copy, so a later write to bs is not seen)."
-  [bs]
+  [#?(:clj ^bytes bs :default bs)]
   (let [n (alength bs)]
     (view-bytes (copy-run bs 0 n) 0 n)))
 
 (defn own
   "b as a value that outlives every read: a chunk view is itself; a view of a domain's block is copied once."
-  [b]
+  [^Bin b]
   (if (slab-view? b) (view-bytes (->bytes b) 0 (field b n)) b))
 
 (defn run
   "[host-bytes off] of binary b's run: a chunk view's own host bytes (no copy), else its bytes copied once — what a
    writer copies the run from."
-  [b]
+  [^Bin b]
   (let [c (field b c) hb (when (some? c) (fio/chunk-bytes c))]
     (if (host-bytes? hb) [hb (field b off)] [(->bytes b) 0])))
 
 (defn slice
   "The binary of bytes [from, to) of b — another view of the same bytes, no copy."
-  ([b from] (slice b from (field b n)))
-  ([b from to]
+  ([^Bin b from] (slice b from (field b n)))
+  ([^Bin b from to]
    (when-not (and (<= 0 from) (<= from to) (<= to (field b n)))
      (enc/throw-index-out-of-bounds (str "slice [" from ", " to ") out of bounds for a binary of " (field b n) " bytes")))
    (Bin. (field b c) (field b sio) (field b blk) (+ (field b off) from) (- to from) (field b pin))))
@@ -166,8 +166,8 @@
 
 (defn scalar-bytes
   "Binary b's eve bytes: [EE DB 28][len varint][run] — its value bytes, key bytes and hash input (FORMAT-V1 §3)."
-  [b]
-  (let [n (field b n) k (varint-len n) out (enc/make-bytes (+ 3 k n))
+  [^Bin b]
+  (let [n (field b n) k (varint-len n) #?(:clj ^bytes out :default out) (enc/make-bytes (+ 3 k n))
         r (run b)]
     (aset out 0 (unchecked-byte 0xEE)) (aset out 1 (unchecked-byte 0xDB)) (aset out 2 (unchecked-byte 0x28))
     (loop [v n i 3]
@@ -179,25 +179,25 @@
 
 (defn- bin-hash [b] (hu/portable-hash-bytes (scalar-bytes b)))
 
-(defn- bin-hex [b]
+(defn- bin-hex [^Bin b]
   (let [hx "0123456789abcdef"]
     (apply str (map (fn [i] (let [u (ubyte b i)] (str (nth hx (quot u 16)) (nth hx (mod u 16)))))
                     (range (field b n))))))
 
-(defn- bin= [a o]
+(defn- bin= [^Bin a o]
   (and (bin? o)
-       (== (field a n) (field o n))
-       (let [ca (field a c) co (field o c) n (field a n)]
+       (== (field a n) (field ^Bin o n))
+       (let [ca (field a c) co (field ^Bin o c) n (field a n)]
          (if (and (some? ca) (some? co))
-           (boolean (fio/bytes= ca (field a off) n (fio/chunk-bytes co) (field o off)))
+           (boolean (fio/bytes= ca (field a off) n (fio/chunk-bytes co) (field ^Bin o off)))
            (loop [i 0]
              (cond (>= i n) true
-                   (== (run-u8 a (+ (field a off) i)) (run-u8 o (+ (field o off) i))) (recur (inc i))
+                   (== (run-u8 a (+ (field a off) i)) (run-u8 o (+ (field ^Bin o off) i))) (recur (inc i))
                    :else false))))))
 
 (defn compare
   "-1 / 0 / 1: binary a against binary b, unsigned lexicographic, a shorter run first on a common prefix."
-  [a b]
+  [^Bin a ^Bin b]
   (let [na (field a n) nb (field b n) ca (field a c) cb (field b c)]
     (if (and (some? ca) (some? cb))
       (fio/bytes-cmp ca (field a off) na (fio/chunk-bytes cb) (field b off) nb)
