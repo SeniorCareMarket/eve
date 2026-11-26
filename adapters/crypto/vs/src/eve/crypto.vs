@@ -1,7 +1,8 @@
 (ns eve.crypto
-  "eve's crypto feature (adapters/README.md) on ValueScript: SHA-256 is the kernel's (vs.core/rt-crypto-sha256, exact
-   over a byte string, no slab), every other primitive eve's portable code (eve.net.portable-crypto). A compiled VS
-   program has no entropy source (VS's docs/abi.md), so random-bytes refuses. Bytes are vectors of 0..255 in and out."
+  "eve's crypto feature (adapters/README.md) on ValueScript: SHA-256, AES-256-CTR and AES-256-GCM are the kernel's rows
+   (vs.core/rt-crypto-sha256, rt-crypto-aes-ctr, rt-crypto-aead-seal / -open: exact over the run's bytes, one call each);
+   every other primitive eve's portable code (eve.net.portable-crypto). A compiled VS program has no entropy source (VS's
+   docs/abi.md), so random-bytes refuses. Bytes are vectors of 0..255 in and out."
   (:require [eve.net.bigops :as bo]
             [eve.net.edwards :as edw]
             [eve.net.portable-crypto :as p]
@@ -18,8 +19,12 @@
         k (into k (repeat (- 64 (count k)) 0))]
     (sha256 (into (mapv (fn [b] (bit-xor b 0x5c)) k)
                   (sha256 (into (mapv (fn [b] (bit-xor b 0x36)) k) (vec msg)))))))
-(defn aes256-ctr "data XOR the AES-256-CTR keystream from the 16-byte iv under a 32-byte key" [key iv data]
-  (p/aes256-ctr key iv data))
+(defn- run [bs] (vb/of-ints (vec bs)))   ; the bytes of a vector of 0..255, as the kernel's rows read them
+(defn aes256-ctr
+  "data XOR the AES-256-CTR keystream from the 16-byte iv under a 32-byte key: the kernel's row (VS's layering U1b,
+   2026-11-26 — the portable cipher ran a block at a time over persistent vectors)"
+  [key iv data]
+  (vb/ints (vs.core/rt-crypto-aes-ctr (run key) (run iv) (run data))))
 (defn xxh3-128 "the 16-byte XXH3-128 digest, big-endian hi then lo" [bs] (p/xxh3-128 bs))
 (defn random-bytes "refused: a compiled VS program has no entropy source" [n]
   (throw (ex-info "eve.crypto/random-bytes: a compiled ValueScript program has no entropy source (VS's docs/abi.md)"
@@ -48,8 +53,12 @@
 (defn ed25519-mul-add "the encoding of [a]P + [b]Q" [a p b q] ((:mul-add ED) a p b q))
 (defn x25519 "X25519 (RFC 7748): the 32-byte u-coordinate of [k]u, k and u 32 little-endian bytes" [k u] ((:x25519 ED) k u))
 (defn sha512 "the 64-byte SHA-512 digest (portable)" [bs] (p/sha512 bs))
-(defn aes256-gcm-seal "AES-256-GCM (portable)" [key iv aad pt] (p/aes256-gcm-seal key iv aad pt))
-(defn aes256-gcm-open "the plaintext of AES-256-GCM ciphertext ‖ tag, or nil (portable)" [key iv aad sealed] (p/aes256-gcm-open key iv aad sealed))
+(defn aes256-gcm-seal "AES-256-GCM (SP 800-38D, 96-bit iv): ciphertext ‖ 16-byte tag — the kernel's row" [key iv aad pt]
+  (vb/ints (vs.core/rt-crypto-aead-seal (run key) (run iv) (run (or aad [])) (run pt))))
+(defn aes256-gcm-open "the plaintext of AES-256-GCM ciphertext ‖ tag, or nil when the tag does not verify — the kernel's row"
+  [key iv aad sealed]
+  (let [p (vs.core/rt-crypto-aead-open (run key) (run iv) (run (or aad [])) (run sealed))]
+    (when (some? p) (vb/ints p))))
 
 (defn ed25519-map-to-point
   "the 32-byte encoding of clear_cofactor(map_to_curve(u0) + map_to_curve(u1)) on edwards25519 (RFC 9380 G.2.1–G.2.2),
