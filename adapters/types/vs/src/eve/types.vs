@@ -35,6 +35,13 @@
      ITransientVector ITransientSet IChunkedSeq IChunkedNext IMapEntry IDeref
      IPrintWithWriter})
 
+(def ^:private vs-core-interfaces
+  "The JVM interfaces a type keeps AS WRITTEN beside their eve.core protocol, because VS's core reads them on a deftype
+   (vs.core: deref through clojure.lang.IDeref/deref, realized? through clojure.lang.IPending/isRealized). Translated
+   only, eve.thread's Future and Promise were no IDeref to VS: (deref (eve.thread/future 42)) threw `deref: not an atom
+   or volatile` (MEASURED on CP31's pair 131ed7d6ff5ae111, 2026-11-27)."
+  '#{clojure.lang.IDeref clojure.lang.IPending})
+
 (def ^:private self-call->eve-core
   "A method a body calls on its own instance, (.m this ...), and the eve.core protocol fn that answers it (the type has
    no such method once translated)."
@@ -125,10 +132,13 @@
                         (mapcat (fn [impl]
                                   (cond
                                     (interface-sym? (:protocol impl))
-                                    (keep (fn [{:keys [protocol] :as t}]
-                                            (when (contains? eve-core-protocols protocol)
-                                              (assoc t :protocol (symbol "eve.core" (name protocol)))))
-                                          (cljs-translate-protocol impl))
+                                    (concat
+                                     (keep (fn [{:keys [protocol] :as t}]
+                                             (when (contains? eve-core-protocols protocol)
+                                               (assoc t :protocol (symbol "eve.core" (name protocol)))))
+                                           (cljs-translate-protocol impl))
+                                     ;; and as written, where VS's core reads that interface on a deftype
+                                     (when (contains? vs-core-interfaces (:protocol impl)) [impl]))
                                     (cljs-protocol? (:protocol impl))
                                     (let [p (strip-cljs-core (:protocol impl))]
                                       (when (contains? eve-core-protocols p)
